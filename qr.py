@@ -10,6 +10,7 @@ from time import sleep, time
 from jira import JIRA
 import xml.etree.ElementTree as ET
 import psycopg2
+import re
 
 st.markdown('<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">', unsafe_allow_html=True)
 img_bytes = Path("files/png/DISg_colored.png").read_bytes()
@@ -94,10 +95,32 @@ if query_params.get("logout") == "true":
     st.session_state.logout = True
 
 def Отправить_заявку(текст: str, файлы: list) -> None:
-    jj = st.session_state.jira
-    projects = JIRA.projects(st.session_state.jira)
-    st.empty()  # В работе
-    return None
+    #projects = JIRA.projects(st.session_state.jira)
+    admin_help = "admin_help_proj_id"
+    business_support = "business_support_proj_id"
+
+    text_arr = текст.split(":\n")
+    split_text = []
+    for i in text_arr:
+        split_text.append(re.sub(r"\n\d\) ","", i).strip("\n"))
+    filtered_split_text = list(filter(None,split_text))
+    filtered_split_text = "\n\n".join(filtered_split_text)
+    filtered_split_text = filtered_split_text.split("\n\n")
+
+    tech, service, improve, other = -1,-1,-1,-1
+    try:
+        tech = filtered_split_text.index('В техподдержку')
+        service = filtered_split_text.index('Обслуживающему персоналу')
+        improve = filtered_split_text.index('Предлагается улучшение')
+        other = filtered_split_text.index('Другие предложения')
+
+    except ValueError as v:
+        print(v)
+
+    if tech != -1:
+        JIRA.create_issue(st.session_state.jira, project=admin_help, summary=f"Проблема {st.session_state.объект}", description=filtered_split_text[tech+1])
+
+    st.rerun()
 
 
 def Объект_проверка() -> bool:
@@ -121,21 +144,23 @@ def Сборка_текста_заявки() -> None:
             if i == 1: st.session_state.текст_заявки += "В техподдержку:\n\n"
             st.session_state.текст_заявки += str(i) + ") " + _ + "\n"
             i += 1
+    if i != 1:
+        st.session_state.текст_заявки += "\n"
     i = 1
     for _ in ПРОБЛЕМЫ["Обслуживание"]:
         if _ in st.session_state.проблемы:
-            if i == 1: st.session_state.текст_заявки += \
-                "\nОбслуживающему персоналу:\n\n"
+            if i == 1: st.session_state.текст_заявки += "Обслуживающему персоналу:\n\n"
             st.session_state.текст_заявки += str(i) + ") " + _ + "\n"
             i += 1
-
+    if i != 1:
+        st.session_state.текст_заявки += "\n"
+    i = 1
     if st.session_state.предложить_улучшение:
-        st.session_state.текст_заявки += "\nПредлагается улучшение:\n\n" + \
-                                         st.session_state.предложить_улучшение.strip() + "\n\n"
+        st.session_state.текст_заявки += ("Предлагается улучшение:\n\n" +
+                                          st.session_state.предложить_улучшение.strip() + "\n\n")
         i += 1
     if st.session_state.другое:
-        st.session_state.текст_заявки += "\nДругие предложения:\n\n" + \
-                                         st.session_state.другое.strip()
+        st.session_state.текст_заявки += "Другие предложения:\n\n" + st.session_state.другое.strip()
     return None
 
 
@@ -218,7 +243,7 @@ def Аутентификация() -> bool:
     except Exception as e:
         st.empty()
         #st.error("Отказ в аутентификации пользователя:"+str(e))
-        # sleep(3)
+        #sleep(3)
     finally:
         return возврат
 
@@ -277,7 +302,6 @@ else:
     </div>
     """, unsafe_allow_html=True)
     st.session_state.logout = False
-    col1, col2 = st.columns([1, 0.13])
     st.header(f"Добро пожаловать, {st.session_state.пользователь}!")
     # Обработка выхода
     if st.session_state.logout:
@@ -286,7 +310,6 @@ else:
         cookies['authenticated'] = 'false'
         cookies['username'] = ''
         cookies['expires_at'] = '0'
-        print("worked")
         cookies.save()
 
     conn = psycopg2.connect(dbname='postgres', user='postgres',
