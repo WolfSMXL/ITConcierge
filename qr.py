@@ -7,7 +7,7 @@ from streamlit import session_state
 from streamlit_cookies_manager import EncryptedCookieManager
 from streamlit.components.v1 import html
 from time import sleep, time
-from jira import JIRA
+from jira.client import JIRA
 import xml.etree.ElementTree as ET
 import psycopg2
 import re
@@ -86,7 +86,7 @@ if not 'пользователь' in st.session_state:
         'пользователь', "Аноним")
 # Имя пользователя
 if not 'имя_пользователя' in st.session_state:
-    st.session_state.имя_пользователя = "Аноним"
+    st.session_state.имя_пользователя = "admin"
 # Обработка выхода
 if "logout" not in st.session_state:
     st.session_state.logout = False
@@ -95,14 +95,19 @@ if query_params.get("logout") == "true":
     st.session_state.logout = True
 
 def Отправить_заявку(текст: str, файлы: list) -> None:
-    #projects = JIRA.projects(st.session_state.jira)
-    admin_help = "admin_help_proj_id"
-    business_support = "business_support_proj_id"
+    projects = JIRA.projects(st.session_state.jira)
+    admin_help = -1
+    business_support = -1
+    for i in projects:
+        if i.name == "Admin Help":
+            admin_help = i.id
+        if i.name == "Business Support":
+            business_support = i.id
 
     text_arr = текст.split(":\n")
     split_text = []
     for i in text_arr:
-        split_text.append(re.sub(r"\n\d\) ","", i).strip("\n"))
+        split_text.append(re.sub(r"\n\d\) ",", ", i).strip("\n"))
     filtered_split_text = list(filter(None,split_text))
     filtered_split_text = "\n\n".join(filtered_split_text)
     filtered_split_text = filtered_split_text.split("\n\n")
@@ -115,10 +120,63 @@ def Отправить_заявку(текст: str, файлы: list) -> None:
         other = filtered_split_text.index('Другие предложения')
 
     except ValueError as v:
-        print(v)
+        print()
 
     if tech != -1:
-        JIRA.create_issue(st.session_state.jira, project=admin_help, summary=f"Проблема {st.session_state.объект}", description=filtered_split_text[tech+1])
+        issue_dict = {
+            'project': {'id': admin_help},
+            'summary': f"Проблема в {st.session_state.объект}",
+            'description': filtered_split_text[tech+1].strip(", "),
+            'issuetype': 'Задача'
+        }
+        try:
+            test = JIRA.create_issue(st.session_state.jira,issue_dict)
+        except Exception as e:
+            print(str(e))
+
+    if service != -1:
+        issue_dict = {
+            'project': {'id': business_support},
+            'summary': f"Проблема в {st.session_state.объект}",
+            'description': filtered_split_text[service+1].strip(", "),
+            'issuetype': 'Задача'
+        }
+        try:
+            test = JIRA.create_issue(st.session_state.jira,issue_dict)
+        except Exception as e:
+            print(str(e))
+
+    if improve != -1:
+        issue_dict = {
+            'project': {'id': admin_help},
+            'summary': f"Предложение по улучшению для {st.session_state.объект}",
+            'description': filtered_split_text[improve + 1].strip(", "),
+            'issuetype': 'Задача'
+        }
+        try:
+            test = JIRA.create_issue(st.session_state.jira,issue_dict)
+        except Exception as e:
+            print(str(e))
+
+    if other != -1:
+        issue_list = [
+            {
+                'project': {'id': admin_help},
+                'summary': f"Проблема в {st.session_state.объект}",
+                'description': filtered_split_text[other + 1].strip(", "),
+                'issuetype': 'Задача'
+            },
+            {
+                'project': {'id': business_support},
+                'summary': f"Проблема в {st.session_state.объект}",
+                'description': filtered_split_text[other + 1].strip(", "),
+                'issuetype': 'Задача'
+            }
+        ]
+        try:
+            test = JIRA.create_issues(st.session_state.jira,issue_list)
+        except Exception as e:
+            print(str(e))
 
     st.rerun()
 
@@ -227,12 +285,11 @@ def Аутентификация() -> bool:
     # Проверка имени пользователя и пароля
     try:
         st.session_state.jira = JIRA(
-            options={"server": "https://jira.data-integration.ru"},
+            options={"server": "http://localhost:8080"},
             basic_auth=(
                 st.session_state.имя_пользователя,
                 st.session_state.пароль_пользователя)
         )
-
         if 'пользователь_информация' not in st.session_state:
             st.session_state.пользователь_информация = \
                 st.session_state.jira.myself()
@@ -243,19 +300,22 @@ def Аутентификация() -> bool:
     except Exception as e:
         st.empty()
         #st.error("Отказ в аутентификации пользователя:"+str(e))
+        print()
         #sleep(3)
     finally:
         return возврат
 
 
 # Если пользователь не аутентифицирован, показываем форму входа
-if Аутентификация():
+if not Аутентификация():
     st.empty()
     c1, c2, c3 = st.columns([1, 4, 1])
     with c2.form("auth_form"):
         st.image("files/png/Jira.webp", use_container_width=True)
-        st.session_state.имя_пользователя = st.text_input("Имя")
+        test = st.text_input("Имя")
+        st.session_state.имя_пользователя = test
         st.session_state.пароль_пользователя = st.text_input("Пароль", type="password")
+        print(test+"...")
         remember_me = st.checkbox("Запомнить")
         submit_button = st.form_submit_button(
             "Вход", use_container_width=True)
