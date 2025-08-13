@@ -86,7 +86,7 @@ if not 'пользователь' in st.session_state:
         'пользователь', "Аноним")
 # Имя пользователя
 if not 'имя_пользователя' in st.session_state:
-    st.session_state.имя_пользователя = "admin"
+    st.session_state.имя_пользователя = "Аноним"
 # Обработка выхода
 if "logout" not in st.session_state:
     st.session_state.logout = False
