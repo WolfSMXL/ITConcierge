@@ -3,12 +3,9 @@ import os
 from pathlib import Path
 
 import streamlit as st
-from streamlit import session_state
 from streamlit_cookies_manager import EncryptedCookieManager
-from streamlit.components.v1 import html
 from time import sleep, time
 from jira.client import JIRA
-import xml.etree.ElementTree as ET
 import psycopg2
 import re
 
@@ -31,13 +28,6 @@ st.set_page_config(
     layout="centered",
     initial_sidebar_state="collapsed"
 )
-
-# Настроить логотип в левом верхнем углу экрана обозревателя
-# st.logo(
-#     image="files/png/DISg_colored.png",
-#     size="large",
-#     link="https://www.dis-group.ru",
-#     icon_image="files/ico/DISg_colored.ico")
 
 # CSS для изменения цвета кнопки формы
 st.markdown("""
@@ -73,7 +63,7 @@ if not 'текст_заявки' in st.session_state:
     st.session_state.текст_заявки = ''
 # Статус аутентификации
 if not 'аутентификация' in st.session_state:
-    st.session_state.аутентификация = True
+    st.session_state.аутентификация = False
 # Статус заявки
 if not 'заявка_отправлена' in st.session_state:
     st.session_state.заявка_отправлена = False
@@ -87,6 +77,8 @@ if not 'пользователь' in st.session_state:
 # Имя пользователя
 if not 'имя_пользователя' in st.session_state:
     st.session_state.имя_пользователя = "Аноним"
+if 'попытка_аутентификации' not in st.session_state:
+    st.session_state.попытка_аутентификации = False
 # Обработка выхода
 if "logout" not in st.session_state:
     st.session_state.logout = False
@@ -281,14 +273,14 @@ def Аутентификация() -> bool:
     """Процедура аутентификации пользователя в Jira.
     При нахождении пользователя в системе возвращает True.
     В обратном случае возвращает False"""
-    возврат = False
     # Проверка имени пользователя и пароля
     try:
         st.session_state.jira = JIRA(
             options={"server": "http://localhost:8080"},
             basic_auth=(
                 st.session_state.имя_пользователя,
-                st.session_state.пароль_пользователя)
+                st.session_state.пароль_пользователя
+            )
         )
         if 'пользователь_информация' not in st.session_state:
             st.session_state.пользователь_информация = \
@@ -296,26 +288,22 @@ def Аутентификация() -> bool:
         st.session_state.пользователь = \
             st.session_state.пользователь_информация.get(
                 'displayName', "Аноним")
-        возврат = True
+        return True
     except Exception as e:
         st.empty()
         #st.error("Отказ в аутентификации пользователя:"+str(e))
         print()
         #sleep(3)
-    finally:
-        return возврат
-
+        return False
 
 # Если пользователь не аутентифицирован, показываем форму входа
-if not Аутентификация():
+if not st.session_state.аутентификация:
     st.empty()
     c1, c2, c3 = st.columns([1, 4, 1])
     with c2.form("auth_form"):
         st.image("files/png/Jira.webp", use_container_width=True)
-        test = st.text_input("Имя")
-        st.session_state.имя_пользователя = test
+        st.session_state.имя_пользователя = st.text_input("Имя")
         st.session_state.пароль_пользователя = st.text_input("Пароль", type="password")
-        print(test+"...")
         remember_me = st.checkbox("Запомнить")
         submit_button = st.form_submit_button(
             "Вход", use_container_width=True)
@@ -367,6 +355,7 @@ else:
     if st.session_state.logout:
         # Сброс данных сессии
         st.session_state.аутентификация = False
+        print(st.session_state.аутентификация)
         cookies['authenticated'] = 'false'
         cookies['username'] = ''
         cookies['expires_at'] = '0'
