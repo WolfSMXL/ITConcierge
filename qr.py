@@ -52,8 +52,23 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+jira = None
+
+try:
+    jira = JIRA(
+            options={"server": "https://jira03ika.data-integration.ru/"},
+            basic_auth=(
+                "maximov_m",
+                "A+z2I#oXl$BQkB!v1v+"
+            ),
+            async_=True
+        )
+    st.session_state.аутентификация = True
+except Exception as e:
+    print(str(e))
+
 # Соединение с Jira
-if 'jira' not in st.session_state: st.session_state.jira = None
+if 'jira' not in st.session_state: st.session_state.jira = jira
 # Статус заявки
 if not 'заявка' in st.session_state: st.session_state.заявка = False
 # Счётчик попыток создания заявок в одном сеансе
@@ -77,11 +92,10 @@ if not 'пользователь' in st.session_state:
 # Имя пользователя
 if not 'имя_пользователя' in st.session_state:
     st.session_state.имя_пользователя = "Аноним"
-if 'попытка_аутентификации' not in st.session_state:
-    st.session_state.попытка_аутентификации = False
 # Обработка выхода
 if "logout" not in st.session_state:
     st.session_state.logout = False
+
 query_params = st.query_params
 if query_params.get("logout") == "true":
     st.session_state.logout = True
@@ -122,7 +136,7 @@ def Отправить_заявку(текст: str, файлы: list) -> None:
             'issuetype': 'Задача'
         }
         try:
-            test = JIRA.create_issue(st.session_state.jira,issue_dict)
+            JIRA.create_issue(st.session_state.jira,issue_dict)
         except Exception as e:
             print(str(e))
 
@@ -134,7 +148,7 @@ def Отправить_заявку(текст: str, файлы: list) -> None:
             'issuetype': 'Задача'
         }
         try:
-            test = JIRA.create_issue(st.session_state.jira,issue_dict)
+            JIRA.create_issue(st.session_state.jira,issue_dict)
         except Exception as e:
             print(str(e))
 
@@ -146,7 +160,7 @@ def Отправить_заявку(текст: str, файлы: list) -> None:
             'issuetype': 'Задача'
         }
         try:
-            test = JIRA.create_issue(st.session_state.jira,issue_dict)
+            JIRA.create_issue(st.session_state.jira,issue_dict)
         except Exception as e:
             print(str(e))
 
@@ -166,7 +180,7 @@ def Отправить_заявку(текст: str, файлы: list) -> None:
             }
         ]
         try:
-            test = JIRA.create_issues(st.session_state.jira,issue_list)
+            JIRA.create_issues(st.session_state.jira,issue_list)
         except Exception as e:
             print(str(e))
 
@@ -275,13 +289,14 @@ def Аутентификация() -> bool:
     В обратном случае возвращает False"""
     # Проверка имени пользователя и пароля
     try:
-        st.session_state.jira = JIRA(
-            options={"server": "http://localhost:8080"},
+        test = JIRA(
+            options={"server": "http://jira03ika.data-integration.ru/"},
             basic_auth=(
                 st.session_state.имя_пользователя,
                 st.session_state.пароль_пользователя
             )
         )
+        st.session_state.jira = test
         if 'пользователь_информация' not in st.session_state:
             st.session_state.пользователь_информация = \
                 st.session_state.jira.myself()
@@ -290,9 +305,8 @@ def Аутентификация() -> bool:
                 'displayName', "Аноним")
         return True
     except Exception as e:
-        st.empty()
         #st.error("Отказ в аутентификации пользователя:"+str(e))
-        print()
+        print(str(e))
         #sleep(3)
         return False
 
@@ -308,7 +322,8 @@ if not st.session_state.аутентификация:
         submit_button = st.form_submit_button(
             "Вход", use_container_width=True)
         if submit_button:
-            if Аутентификация():
+            test = Аутентификация()
+            if test:
                 st.session_state.аутентификация = True
                 if remember_me:
                     # Устанавливаем cookie с сроком действия 30 дней
@@ -361,8 +376,8 @@ else:
         cookies['expires_at'] = '0'
         cookies.save()
 
-    conn = psycopg2.connect(dbname='postgres', user='postgres',
-                            password='postgres', host='localhost', port='5432')
+    conn = psycopg2.connect(dbname='testdb', user='admin',
+                            password='admin', host='nifi01-cons.data-integration.ru', port='5432')
     cursor = conn.cursor()
     cursor.execute('SELECT * FROM itconcierge."Objects"')
     objects = cursor.fetchall()
