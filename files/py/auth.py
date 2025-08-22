@@ -50,7 +50,7 @@ class AuthManager:
     def _authenticate(self, username, password):
         try:
             jira = JIRA(
-                server="https://jira.data-integration.ru",
+                server="https://jira03ika.data-integration.ru/",
                 basic_auth=(username, password),
                 timeout=10
             )

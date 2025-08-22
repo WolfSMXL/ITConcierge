@@ -5,7 +5,7 @@ def check_jira_auth(username, password):
     """Проверка авторизации в JIRA"""
     try:
         JIRA(
-            server="https://jira.data-integration.ru",
+            server="https://jira03ika.data-integration.ru/",
             basic_auth=(username, password),
             timeout=10
         )

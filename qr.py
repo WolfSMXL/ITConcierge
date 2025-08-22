@@ -2,6 +2,11 @@ import base64
 import os
 from pathlib import Path
 
+import jira
+import requests
+import time
+from urllib.parse import urlencode
+
 import streamlit as st
 from streamlit_cookies_manager import EncryptedCookieManager
 from time import sleep, time
@@ -53,7 +58,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Соединение с Jira
-if 'jira' not in st.session_state: st.session_state.jira = None
+if 'jira' not in st.session_state: st.session_state.jira = jira
 # Статус заявки
 if not 'заявка' in st.session_state: st.session_state.заявка = False
 # Счётчик попыток создания заявок в одном сеансе
@@ -77,8 +82,8 @@ if not 'пользователь' in st.session_state:
 # Имя пользователя
 if not 'имя_пользователя' in st.session_state:
     st.session_state.имя_пользователя = "Аноним"
-if 'попытка_аутентификации' not in st.session_state:
-    st.session_state.попытка_аутентификации = False
+# if 'попытка_аутентификации' not in st.session_state:
+#     st.session_state.попытка_аутентификации = False
 # Обработка выхода
 if "logout" not in st.session_state:
     st.session_state.logout = False
@@ -121,10 +126,24 @@ def Отправить_заявку(текст: str, файлы: list) -> None:
             'description': filtered_split_text[tech+1].strip(", "),
             'issuetype': 'Задача'
         }
+        # try:
+        #     test = JIRA.create_issue(st.session_state.jira,issue_dict)
+        # except Exception as e:
+        #     print(str(e))
         try:
-            test = JIRA.create_issue(st.session_state.jira,issue_dict)
+            test = JIRA.create_issue(st.session_state.jira, issue_dict)
         except Exception as e:
-            print(str(e))
+            if "CAPTCHA_CHALLENGE" in str(e):
+                # Логика обработки капчи
+                login_url = 'https://jira03ika.data-integration.ru/login.jsp'
+                params = {'continue': '/rest/api/2/serverInfo'}
+                redirect_url = f"{login_url}?{urlencode(params)}"
+                st.write(f"Необходимо ввести капчу. Откройте следующую ссылку и следуйте инструкциям:")
+                st.write(redirect_url)
+                if st.button("Подтвердить ввод капчи"):
+                    st.rerun()
+            else:
+                st.error(f"Ошибка при создании заявки: {str(e)}")
 
     if service != -1:
         issue_dict = {
@@ -133,10 +152,24 @@ def Отправить_заявку(текст: str, файлы: list) -> None:
             'description': filtered_split_text[service+1].strip(", "),
             'issuetype': 'Задача'
         }
+        # try:
+        #     test = JIRA.create_issue(st.session_state.jira,issue_dict)
+        # except Exception as e:
+        #     print(str(e))
         try:
-            test = JIRA.create_issue(st.session_state.jira,issue_dict)
+            test = JIRA.create_issue(st.session_state.jira, issue_dict)
         except Exception as e:
-            print(str(e))
+            if "CAPTCHA_CHALLENGE" in str(e):
+                # Логика обработки капчи
+                login_url = 'https://jira03ika.data-integration.ru/login.jsp'
+                params = {'continue': '/rest/api/2/serverInfo'}
+                redirect_url = f"{login_url}?{urlencode(params)}"
+                st.write(f"Необходимо ввести капчу. Откройте следующую ссылку и следуйте инструкциям:")
+                st.write(redirect_url)
+                if st.button("Подтвердить ввод капчи"):
+                    st.rerun()
+            else:
+                st.error(f"Ошибка при создании заявки: {str(e)}")
 
     if improve != -1:
         issue_dict = {
@@ -145,10 +178,24 @@ def Отправить_заявку(текст: str, файлы: list) -> None:
             'description': filtered_split_text[improve + 1].strip(", "),
             'issuetype': 'Задача'
         }
+        # try:
+        #     test = JIRA.create_issue(st.session_state.jira,issue_dict)
+        # except Exception as e:
+        #     print(str(e))
         try:
-            test = JIRA.create_issue(st.session_state.jira,issue_dict)
+            test = JIRA.create_issue(st.session_state.jira, issue_dict)
         except Exception as e:
-            print(str(e))
+            if "CAPTCHA_CHALLENGE" in str(e):
+                # Логика обработки капчи
+                login_url = 'https://jira03ika.data-integration.ru/login.jsp'
+                params = {'continue': '/rest/api/2/serverInfo'}
+                redirect_url = f"{login_url}?{urlencode(params)}"
+                st.write(f"Необходимо ввести капчу. Откройте следующую ссылку и следуйте инструкциям:")
+                st.write(redirect_url)
+                if st.button("Подтвердить ввод капчи"):
+                    st.rerun()
+            else:
+                st.error(f"Ошибка при создании заявки: {str(e)}")
 
     if other != -1:
         issue_list = [
@@ -165,10 +212,24 @@ def Отправить_заявку(текст: str, файлы: list) -> None:
                 'issuetype': 'Задача'
             }
         ]
+        # try:
+        #     test = JIRA.create_issues(st.session_state.jira,issue_list)
+        # except Exception as e:
+        #     print(str(e))
         try:
-            test = JIRA.create_issues(st.session_state.jira,issue_list)
+            test = JIRA.create_issue(st.session_state.jira, issue_dict)
         except Exception as e:
-            print(str(e))
+            if "CAPTCHA_CHALLENGE" in str(e):
+                # Логика обработки капчи
+                login_url = 'https://jira03ika.data-integration.ru/login.jsp'
+                params = {'continue': '/rest/api/2/serverInfo'}
+                redirect_url = f"{login_url}?{urlencode(params)}"
+                st.write(f"Необходимо ввести капчу. Откройте следующую ссылку и следуйте инструкциям:")
+                st.write(redirect_url)
+                if st.button("Подтвердить ввод капчи"):
+                    st.rerun()
+            else:
+                st.error(f"Ошибка при создании заявки: {str(e)}")
 
     st.rerun()
 
@@ -268,33 +329,26 @@ if not cookies.ready():
     st.spinner("Ожидание загрузки хлебных крошек", show_time=True)
     st.stop()
 
-
+@st.cache_data
 def Аутентификация() -> bool:
     """Процедура аутентификации пользователя в Jira.
     При нахождении пользователя в системе возвращает True.
     В обратном случае возвращает False"""
     # Проверка имени пользователя и пароля
     try:
+        login = "tech_acc"
+        password = "123!2@#f222fD+_1"
+        token_auth = ('tech_acc', '123!2@#f222fD+_1')
         st.session_state.jira = JIRA(
-            options={"server": "http://localhost:8080"},
-            basic_auth=(
-                st.session_state.имя_пользователя,
-                st.session_state.пароль_пользователя
-            )
+            options={"server": "https://jira03ika.data-integration.ru/"},
+            token_auth=token_auth,
         )
-        if 'пользователь_информация' not in st.session_state:
-            st.session_state.пользователь_информация = \
-                st.session_state.jira.myself()
-        st.session_state.пользователь = \
-            st.session_state.пользователь_информация.get(
-                'displayName', "Аноним")
-        return True
+        st.session_state.аутентификация = True
     except Exception as e:
-        st.empty()
+        #st.empty()
         #st.error("Отказ в аутентификации пользователя:"+str(e))
-        print()
+        print(str(e))
         #sleep(3)
-        return False
 
 # Если пользователь не аутентифицирован, показываем форму входа
 if not st.session_state.аутентификация:
@@ -303,7 +357,6 @@ if not st.session_state.аутентификация:
     with c2.form("auth_form"):
         st.image("files/png/Jira.webp", use_container_width=True)
         st.session_state.имя_пользователя = st.text_input("Имя")
-        st.session_state.пароль_пользователя = st.text_input("Пароль", type="password")
         remember_me = st.checkbox("Запомнить")
         submit_button = st.form_submit_button(
             "Вход", use_container_width=True)
@@ -361,8 +414,8 @@ else:
         cookies['expires_at'] = '0'
         cookies.save()
 
-    conn = psycopg2.connect(dbname='postgres', user='postgres',
-                            password='postgres', host='localhost', port='5432')
+    conn = psycopg2.connect(dbname='testdb', user='admin',
+                            password='admin', host='nifi01-cons.data-integration.ru', port='5432')
     cursor = conn.cursor()
     cursor.execute('SELECT * FROM itconcierge."Objects"')
     objects = cursor.fetchall()

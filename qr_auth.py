@@ -12,6 +12,7 @@ if not cookies.ready():
     # Ждем, пока куки загрузятся
     st.stop()
 
+
 # Функция для хеширования паролей
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
