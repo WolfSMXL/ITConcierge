@@ -52,10 +52,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-jira = None
 
-try:
-    jira = JIRA(
+
+
+# Соединение с Jira
+if 'jira' not in st.session_state:
+    try:
+        jira = JIRA(
             options={"server": "https://jira03ika.data-integration.ru/"},
             basic_auth=(
                 "maximov_m",
@@ -63,12 +66,11 @@ try:
             ),
             async_=True
         )
-    st.session_state.аутентификация = True
-except Exception as e:
-    print(str(e))
-
-# Соединение с Jira
-if 'jira' not in st.session_state: st.session_state.jira = jira
+        st.session_state.аутентификация = True
+    except Exception as e:
+        print(str(e))
+        jira = None
+    st.session_state.jira = jira
 # Статус заявки
 if not 'заявка' in st.session_state: st.session_state.заявка = False
 # Счётчик попыток создания заявок в одном сеансе
@@ -105,9 +107,9 @@ def Отправить_заявку(текст: str, файлы: list) -> None:
     admin_help = -1
     business_support = -1
     for i in projects:
-        if i.name == "Admin Help":
+        if i.key == "AH":
             admin_help = i.id
-        if i.name == "Business Support":
+        if i.key == "BS":
             business_support = i.id
 
     text_arr = текст.split(":\n")
@@ -120,13 +122,21 @@ def Отправить_заявку(текст: str, файлы: list) -> None:
 
     tech, service, improve, other = -1,-1,-1,-1
     try:
-        tech = filtered_split_text.index('В техподдержку')
-        service = filtered_split_text.index('Обслуживающему персоналу')
-        improve = filtered_split_text.index('Предлагается улучшение')
-        other = filtered_split_text.index('Другие предложения')
+        for i in range(0,len(filtered_split_text)):
+            if filtered_split_text[i] == 'В техподдержку': tech = i
+            if filtered_split_text[i] == 'Обслуживающему персоналу': service = i
+            if filtered_split_text[i] == 'Предлагается улучшение': improve = i
+            if filtered_split_text[i] == 'Другие предложения': other = i
+
+        #tech = filtered_split_text.index('В техподдержку')
+        #service = filtered_split_text.index('Обслуживающему персоналу')
+        #improve = filtered_split_text.index('Предлагается улучшение')
+        #other = filtered_split_text.index('Другие предложения')
 
     except ValueError as v:
         print()
+
+    issues_list = []
 
     if tech != -1:
         issue_dict = {
@@ -135,10 +145,7 @@ def Отправить_заявку(текст: str, файлы: list) -> None:
             'description': filtered_split_text[tech+1].strip(", "),
             'issuetype': 'Задача'
         }
-        try:
-            JIRA.create_issue(st.session_state.jira,issue_dict)
-        except Exception as e:
-            print(str(e))
+        issues_list.append(issue_dict)
 
     if service != -1:
         issue_dict = {
@@ -147,10 +154,7 @@ def Отправить_заявку(текст: str, файлы: list) -> None:
             'description': filtered_split_text[service+1].strip(", "),
             'issuetype': 'Задача'
         }
-        try:
-            JIRA.create_issue(st.session_state.jira,issue_dict)
-        except Exception as e:
-            print(str(e))
+        issues_list.append(issue_dict)
 
     if improve != -1:
         issue_dict = {
@@ -159,30 +163,20 @@ def Отправить_заявку(текст: str, файлы: list) -> None:
             'description': filtered_split_text[improve + 1].strip(", "),
             'issuetype': 'Задача'
         }
-        try:
-            JIRA.create_issue(st.session_state.jira,issue_dict)
-        except Exception as e:
-            print(str(e))
+        issues_list.append(issue_dict)
 
     if other != -1:
-        issue_list = [
-            {
+        issue_dict = {
                 'project': {'id': admin_help},
-                'summary': f"Проблема в {st.session_state.объект}",
-                'description': filtered_split_text[other + 1].strip(", "),
-                'issuetype': 'Задача'
-            },
-            {
-                'project': {'id': business_support},
-                'summary': f"Проблема в {st.session_state.объект}",
+                'summary': f"Другая проблема в {st.session_state.объект}",
                 'description': filtered_split_text[other + 1].strip(", "),
                 'issuetype': 'Задача'
             }
-        ]
-        try:
-            JIRA.create_issues(st.session_state.jira,issue_list)
-        except Exception as e:
-            print(str(e))
+        issues_list.append(issue_dict)
+    try:
+        JIRA.create_issues(st.session_state.jira, issues_list)
+    except Exception as e:
+        print(str(e))
 
     st.rerun()
 
