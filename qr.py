@@ -58,7 +58,20 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Соединение с Jira
-if 'jira' not in st.session_state: st.session_state.jira = jira
+if 'jira' not in st.session_state:
+    try:
+        login = "tech_acc"
+        password = "123!2@#f222fD+_1"
+        token_auth = ('tech_acc', '123!2@#f222fD+_1')
+        st.session_state.jira = JIRA(
+            options={"server": "https://jira03ika.data-integration.ru/"},
+            token_auth=token_auth,
+        )
+        # st.session_state.аутентификация = True
+    except Exception as e:
+        print(str(e))
+        jira = None
+    st.session_state.jira = jira
 # Статус заявки
 if not 'заявка' in st.session_state: st.session_state.заявка = False
 # Счётчик попыток создания заявок в одном сеансе
@@ -91,14 +104,14 @@ query_params = st.query_params
 if query_params.get("logout") == "true":
     st.session_state.logout = True
 
-def Отправить_заявку(текст: str, файлы: list) -> None:
+def Отправить_заявку(текст: str, файлы: list, issue_list=None) -> None:
     projects = JIRA.projects(st.session_state.jira)
     admin_help = -1
     business_support = -1
     for i in projects:
-        if i.name == "Admin Help":
+        if i.key == "AH":
             admin_help = i.id
-        if i.name == "Business Support":
+        if i.key == "BS":
             business_support = i.id
 
     text_arr = текст.split(":\n")
@@ -111,13 +124,20 @@ def Отправить_заявку(текст: str, файлы: list) -> None:
 
     tech, service, improve, other = -1,-1,-1,-1
     try:
-        tech = filtered_split_text.index('В техподдержку')
-        service = filtered_split_text.index('Обслуживающему персоналу')
-        improve = filtered_split_text.index('Предлагается улучшение')
-        other = filtered_split_text.index('Другие предложения')
+        for i in range(0,len(filtered_split_text)):
+            if filtered_split_text[i] == 'В техподдержку': tech = i
+            if filtered_split_text[i] == 'Обслуживающему персоналу': service = i
+            if filtered_split_text[i] == 'Предлагается улучшение': improve = i
+            if filtered_split_text[i] == 'Другие предложения': other = i
+        # tech = filtered_split_text.index('В техподдержку')
+        # service = filtered_split_text.index('Обслуживающему персоналу')
+        # improve = filtered_split_text.index('Предлагается улучшение')
+        # other = filtered_split_text.index('Другие предложения')
 
     except ValueError as v:
         print()
+
+        issues_list = []
 
     if tech != -1:
         issue_dict = {
@@ -126,24 +146,25 @@ def Отправить_заявку(текст: str, файлы: list) -> None:
             'description': filtered_split_text[tech+1].strip(", "),
             'issuetype': 'Задача'
         }
+        issues_list.append(issue_dict)
         # try:
         #     test = JIRA.create_issue(st.session_state.jira,issue_dict)
         # except Exception as e:
         #     print(str(e))
-        try:
-            test = JIRA.create_issue(st.session_state.jira, issue_dict)
-        except Exception as e:
-            if "CAPTCHA_CHALLENGE" in str(e):
-                # Логика обработки капчи
-                login_url = 'https://jira03ika.data-integration.ru/login.jsp'
-                params = {'continue': '/rest/api/2/serverInfo'}
-                redirect_url = f"{login_url}?{urlencode(params)}"
-                st.write(f"Необходимо ввести капчу. Откройте следующую ссылку и следуйте инструкциям:")
-                st.write(redirect_url)
-                if st.button("Подтвердить ввод капчи"):
-                    st.rerun()
-            else:
-                st.error(f"Ошибка при создании заявки: {str(e)}")
+        # try:
+        #     test = JIRA.create_issue(st.session_state.jira, issue_dict)
+        # except Exception as e:
+        #     if "CAPTCHA_CHALLENGE" in str(e):
+        #         # Логика обработки капчи
+        #         login_url = 'https://jira03ika.data-integration.ru/login.jsp'
+        #         params = {'continue': '/rest/api/2/serverInfo'}
+        #         redirect_url = f"{login_url}?{urlencode(params)}"
+        #         st.write(f"Необходимо ввести капчу. Откройте следующую ссылку и следуйте инструкциям:")
+        #         st.write(redirect_url)
+        #         if st.button("Подтвердить ввод капчи"):
+        #             st.rerun()
+        #     else:
+        #         st.error(f"Ошибка при создании заявки: {str(e)}")
 
     if service != -1:
         issue_dict = {
@@ -152,24 +173,25 @@ def Отправить_заявку(текст: str, файлы: list) -> None:
             'description': filtered_split_text[service+1].strip(", "),
             'issuetype': 'Задача'
         }
+        issues_list.append(issue_dict)
         # try:
         #     test = JIRA.create_issue(st.session_state.jira,issue_dict)
         # except Exception as e:
         #     print(str(e))
-        try:
-            test = JIRA.create_issue(st.session_state.jira, issue_dict)
-        except Exception as e:
-            if "CAPTCHA_CHALLENGE" in str(e):
-                # Логика обработки капчи
-                login_url = 'https://jira03ika.data-integration.ru/login.jsp'
-                params = {'continue': '/rest/api/2/serverInfo'}
-                redirect_url = f"{login_url}?{urlencode(params)}"
-                st.write(f"Необходимо ввести капчу. Откройте следующую ссылку и следуйте инструкциям:")
-                st.write(redirect_url)
-                if st.button("Подтвердить ввод капчи"):
-                    st.rerun()
-            else:
-                st.error(f"Ошибка при создании заявки: {str(e)}")
+        # try:
+        #     test = JIRA.create_issue(st.session_state.jira, issue_dict)
+        # except Exception as e:
+        #     if "CAPTCHA_CHALLENGE" in str(e):
+        #         # Логика обработки капчи
+        #         login_url = 'https://jira03ika.data-integration.ru/login.jsp'
+        #         params = {'continue': '/rest/api/2/serverInfo'}
+        #         redirect_url = f"{login_url}?{urlencode(params)}"
+        #         st.write(f"Необходимо ввести капчу. Откройте следующую ссылку и следуйте инструкциям:")
+        #         st.write(redirect_url)
+        #         if st.button("Подтвердить ввод капчи"):
+        #             st.rerun()
+        #     else:
+        #         st.error(f"Ошибка при создании заявки: {str(e)}")
 
     if improve != -1:
         issue_dict = {
@@ -178,46 +200,37 @@ def Отправить_заявку(текст: str, файлы: list) -> None:
             'description': filtered_split_text[improve + 1].strip(", "),
             'issuetype': 'Задача'
         }
+        issues_list.append(issue_dict)
         # try:
         #     test = JIRA.create_issue(st.session_state.jira,issue_dict)
         # except Exception as e:
         #     print(str(e))
-        try:
-            test = JIRA.create_issue(st.session_state.jira, issue_dict)
-        except Exception as e:
-            if "CAPTCHA_CHALLENGE" in str(e):
-                # Логика обработки капчи
-                login_url = 'https://jira03ika.data-integration.ru/login.jsp'
-                params = {'continue': '/rest/api/2/serverInfo'}
-                redirect_url = f"{login_url}?{urlencode(params)}"
-                st.write(f"Необходимо ввести капчу. Откройте следующую ссылку и следуйте инструкциям:")
-                st.write(redirect_url)
-                if st.button("Подтвердить ввод капчи"):
-                    st.rerun()
-            else:
-                st.error(f"Ошибка при создании заявки: {str(e)}")
+        # try:
+        #     test = JIRA.create_issue(st.session_state.jira, issue_dict)
+        # except Exception as e:
+        #     if "CAPTCHA_CHALLENGE" in str(e):
+        #         # Логика обработки капчи
+        #         login_url = 'https://jira03ika.data-integration.ru/login.jsp'
+        #         params = {'continue': '/rest/api/2/serverInfo'}
+        #         redirect_url = f"{login_url}?{urlencode(params)}"
+        #         st.write(f"Необходимо ввести капчу. Откройте следующую ссылку и следуйте инструкциям:")
+        #         st.write(redirect_url)
+        #         if st.button("Подтвердить ввод капчи"):
+        #             st.rerun()
+        #     else:
+        #         st.error(f"Ошибка при создании заявки: {str(e)}")
 
     if other != -1:
-        issue_list = [
-            {
+        issue_dict = {
                 'project': {'id': admin_help},
-                'summary': f"Проблема в {st.session_state.объект}",
-                'description': filtered_split_text[other + 1].strip(", "),
-                'issuetype': 'Задача'
-            },
-            {
-                'project': {'id': business_support},
-                'summary': f"Проблема в {st.session_state.объект}",
+                'summary': f"Другая проблема в {st.session_state.объект}",
                 'description': filtered_split_text[other + 1].strip(", "),
                 'issuetype': 'Задача'
             }
-        ]
-        # try:
-        #     test = JIRA.create_issues(st.session_state.jira,issue_list)
-        # except Exception as e:
-        #     print(str(e))
+
+        issues_list.append(issue_dict)
         try:
-            test = JIRA.create_issue(st.session_state.jira, issue_dict)
+            test = JIRA.create_issues(st.session_state.jira,issue_list)
         except Exception as e:
             if "CAPTCHA_CHALLENGE" in str(e):
                 # Логика обработки капчи
@@ -230,6 +243,20 @@ def Отправить_заявку(текст: str, файлы: list) -> None:
                     st.rerun()
             else:
                 st.error(f"Ошибка при создании заявки: {str(e)}")
+        # try:
+        #     test = JIRA.create_issue(st.session_state.jira, issue_dict)
+        # except Exception as e:
+        #     if "CAPTCHA_CHALLENGE" in str(e):
+        #         # Логика обработки капчи
+        #         login_url = 'https://jira03ika.data-integration.ru/login.jsp'
+        #         params = {'continue': '/rest/api/2/serverInfo'}
+        #         redirect_url = f"{login_url}?{urlencode(params)}"
+        #         st.write(f"Необходимо ввести капчу. Откройте следующую ссылку и следуйте инструкциям:")
+        #         st.write(redirect_url)
+        #         if st.button("Подтвердить ввод капчи"):
+        #             st.rerun()
+        #     else:
+        #         st.error(f"Ошибка при создании заявки: {str(e)}")
 
     st.rerun()
 
@@ -336,18 +363,26 @@ def Аутентификация() -> bool:
     В обратном случае возвращает False"""
     # Проверка имени пользователя и пароля
     try:
-        login = "tech_acc"
-        password = "123!2@#f222fD+_1"
+        # login = "tech_acc"
+        # password = "123!2@#f222fD+_1"
         token_auth = ('tech_acc', '123!2@#f222fD+_1')
         st.session_state.jira = JIRA(
             options={"server": "https://jira03ika.data-integration.ru/"},
             token_auth=token_auth,
         )
         st.session_state.аутентификация = True
+        if 'пользователь_информация' not in st.session_state:
+            st.session_state.пользователь_информация = \
+                st.session_state.jira.myself()
+        st.session_state.пользователь = \
+            st.session_state.пользователь_информация.get(
+                'displayName', "Аноним")
+        return True
     except Exception as e:
         #st.empty()
         #st.error("Отказ в аутентификации пользователя:"+str(e))
         print(str(e))
+        return False
         #sleep(3)
 
 # Если пользователь не аутентифицирован, показываем форму входа
@@ -361,7 +396,6 @@ if not st.session_state.аутентификация:
         submit_button = st.form_submit_button(
             "Вход", use_container_width=True)
         if submit_button:
-            if Аутентификация():
                 st.session_state.аутентификация = True
                 if remember_me:
                     # Устанавливаем cookie с сроком действия 30 дней
@@ -372,8 +406,6 @@ if not st.session_state.аутентификация:
                     cookies.save()
                     # Обновляем страницу, чтобы скрыть форму входа
                 st.rerun()
-            else:
-                st.error("Неверное имя пользователя или пароль")
 
 # Если пользователь аутентифицирован, показываем основное содержимое
 else:
@@ -403,7 +435,7 @@ else:
     </div>
     """, unsafe_allow_html=True)
     st.session_state.logout = False
-    st.header(f"Добро пожаловать, {st.session_state.пользователь}!")
+    st.header(f"Добро пожаловать, {st.session_state.имя_пользователя}!")
     # Обработка выхода
     if st.session_state.logout:
         # Сброс данных сессии
