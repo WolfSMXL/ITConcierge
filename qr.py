@@ -370,6 +370,7 @@ def Аутентификация() -> bool:
             options={"server": "https://jira03ika.data-integration.ru/"},
             token_auth=token_auth,
         )
+
         st.session_state.аутентификация = True
         if 'пользователь_информация' not in st.session_state:
             st.session_state.пользователь_информация = \
