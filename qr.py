@@ -1,7 +1,9 @@
 import base64
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
+load_dotenv()
 import jira
 import requests
 import time
@@ -363,9 +365,7 @@ def Аутентификация() -> bool:
     В обратном случае возвращает False"""
     # Проверка имени пользователя и пароля
     try:
-        # login = "tech_acc"
-        # password = "123!2@#f222fD+_1"
-        token_auth = ('tech_acc', '123!2@#f222fD+_1')
+        token_auth = (os.getenv("TECH_LOGIN"), os.getenv("TECH_PASSWORD"))
         st.session_state.jira = JIRA(
             options={"server": "https://jira03ika.data-integration.ru/"},
             token_auth=token_auth,
