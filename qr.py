@@ -364,10 +364,10 @@ else:
         cookies['expires_at'] = '0'
         cookies.save()
 
-    conn = psycopg2.connect(dbname='testdb', user='admin',
-                            password='admin', host='nifi01-cons.data-integration.ru', port='5432')
-    #conn = psycopg2.connect(dbname='postgres', user='postgres',
-    #                        password='postgres', host='localhost', port='5432')
+    #conn = psycopg2.connect(dbname='testdb', user='admin',
+    #                        password='admin', host='nifi01-cons.data-integration.ru', port='5432')
+    conn = psycopg2.connect(dbname='postgres', user='postgres',
+                            password='postgres', host='localhost', port='5432')
     cursor = conn.cursor()
     cursor.execute('SELECT * FROM itconcierge."Objects"')
     objects = cursor.fetchall()
