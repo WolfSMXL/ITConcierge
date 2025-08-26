@@ -1,20 +1,20 @@
 import base64
+import io
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-
-load_dotenv()
 import jira
 import requests
 import time
 from urllib.parse import urlencode
-
 import streamlit as st
 from streamlit_cookies_manager import EncryptedCookieManager
 from time import sleep, time
 from jira.client import JIRA
 import psycopg2
 import re
+
+load_dotenv()
 
 st.markdown('<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">', unsafe_allow_html=True)
 img_bytes = Path("files/png/DISg_colored.png").read_bytes()
@@ -62,52 +62,42 @@ st.markdown("""
 # Соединение с Jira
 if 'jira' not in st.session_state:
     try:
-        login = "tech_acc"
-        password = "123!2@#f222fD+_1"
-        token_auth = ('tech_acc', '123!2@#f222fD+_1')
-        st.session_state.jira = JIRA(
-            options={"server": "https://jira03ika.data-integration.ru/"},
-            token_auth=token_auth,
+        token_auth = (os.getenv("TECH_LOGIN"), os.getenv("TECH_PASSWORD"))
+        test = os.getenv("JIRA_SERVER")
+        jira = JIRA(
+            options={"server": os.getenv("JIRA_SERVER")},
+            basic_auth=token_auth
         )
-        # st.session_state.аутентификация = True
     except Exception as e:
         print(str(e))
         jira = None
     st.session_state.jira = jira
 # Статус заявки
-if not 'заявка' in st.session_state: st.session_state.заявка = False
+if not 'request' in st.session_state: st.session_state.request = False
 # Счётчик попыток создания заявок в одном сеансе
-if not 'счётчик' in st.session_state: st.session_state.счётчик = 0
+if not 'counter' in st.session_state: st.session_state.counter = 0
 # Текст заявки
-if not 'текст_заявки' in st.session_state:
-    st.session_state.текст_заявки = ''
+if not 'request_body' in st.session_state: st.session_state.request_body = ''
 # Статус аутентификации
-if not 'аутентификация' in st.session_state:
-    st.session_state.аутентификация = False
+if not 'auth' in st.session_state: st.session_state.auth = False
 # Статус заявки
-if not 'заявка_отправлена' in st.session_state:
-    st.session_state.заявка_отправлена = False
+if not 'request_sent' in st.session_state: st.session_state.request_sent = False
 # Название проблемного объекта
-if not 'объект' in st.session_state:
-    st.session_state.объект = st.query_params.get('объект', None)
+if not 'object' in st.session_state: st.session_state.object = st.query_params.get('object', None)
 # Пользователь
-if not 'пользователь' in st.session_state:
-    st.session_state.пользователь = st.query_params.get(
-        'пользователь', "Аноним")
+if not 'user' in st.session_state: st.session_state.user = st.query_params.get(
+    'user', "Аноним")
 # Имя пользователя
-if not 'имя_пользователя' in st.session_state:
-    st.session_state.имя_пользователя = "Аноним"
-# if 'попытка_аутентификации' not in st.session_state:
-#     st.session_state.попытка_аутентификации = False
+if not 'user_name' in st.session_state: st.session_state.user_name = "Аноним"
 # Обработка выхода
-if "logout" not in st.session_state:
-    st.session_state.logout = False
-query_params = st.query_params
-if query_params.get("logout") == "true":
-    st.session_state.logout = True
+if "logout" not in st.session_state: st.session_state.logout = False
 
-def Отправить_заявку(текст: str, файлы: list, issue_list=None) -> None:
-    projects = JIRA.projects(st.session_state.jira)
+query_params = st.query_params
+if query_params.get("logout") == "true": st.session_state.logout = True
+
+def create_tasks(body: str, files: list) -> None:
+    jira = st.session_state.jira
+    projects = jira.projects()
     admin_help = -1
     business_support = -1
     for i in projects:
@@ -116,7 +106,7 @@ def Отправить_заявку(текст: str, файлы: list, issue_lis
         if i.key == "BS":
             business_support = i.id
 
-    text_arr = текст.split(":\n")
+    text_arr = body.split(":\n")
     split_text = []
     for i in text_arr:
         split_text.append(re.sub(r"\n\d\) ",", ", i).strip("\n"))
@@ -131,191 +121,119 @@ def Отправить_заявку(текст: str, файлы: list, issue_lis
             if filtered_split_text[i] == 'Обслуживающему персоналу': service = i
             if filtered_split_text[i] == 'Предлагается улучшение': improve = i
             if filtered_split_text[i] == 'Другие предложения': other = i
-        # tech = filtered_split_text.index('В техподдержку')
-        # service = filtered_split_text.index('Обслуживающему персоналу')
-        # improve = filtered_split_text.index('Предлагается улучшение')
-        # other = filtered_split_text.index('Другие предложения')
 
     except ValueError as v:
-        print()
+        print(str(v))
 
-        issues_list = []
+    issues_list = []
 
     if tech != -1:
         issue_dict = {
             'project': {'id': admin_help},
-            'summary': f"Проблема в {st.session_state.объект}",
+            'summary': f"Проблема в {st.session_state.object}",
             'description': filtered_split_text[tech+1].strip(", "),
             'issuetype': 'Задача'
         }
         issues_list.append(issue_dict)
-        # try:
-        #     test = JIRA.create_issue(st.session_state.jira,issue_dict)
-        # except Exception as e:
-        #     print(str(e))
-        # try:
-        #     test = JIRA.create_issue(st.session_state.jira, issue_dict)
-        # except Exception as e:
-        #     if "CAPTCHA_CHALLENGE" in str(e):
-        #         # Логика обработки капчи
-        #         login_url = 'https://jira03ika.data-integration.ru/login.jsp'
-        #         params = {'continue': '/rest/api/2/serverInfo'}
-        #         redirect_url = f"{login_url}?{urlencode(params)}"
-        #         st.write(f"Необходимо ввести капчу. Откройте следующую ссылку и следуйте инструкциям:")
-        #         st.write(redirect_url)
-        #         if st.button("Подтвердить ввод капчи"):
-        #             st.rerun()
-        #     else:
-        #         st.error(f"Ошибка при создании заявки: {str(e)}")
 
     if service != -1:
         issue_dict = {
             'project': {'id': business_support},
-            'summary': f"Проблема в {st.session_state.объект}",
+            'summary': f"Проблема в {st.session_state.object}",
             'description': filtered_split_text[service+1].strip(", "),
             'issuetype': 'Задача'
         }
         issues_list.append(issue_dict)
-        # try:
-        #     test = JIRA.create_issue(st.session_state.jira,issue_dict)
-        # except Exception as e:
-        #     print(str(e))
-        # try:
-        #     test = JIRA.create_issue(st.session_state.jira, issue_dict)
-        # except Exception as e:
-        #     if "CAPTCHA_CHALLENGE" in str(e):
-        #         # Логика обработки капчи
-        #         login_url = 'https://jira03ika.data-integration.ru/login.jsp'
-        #         params = {'continue': '/rest/api/2/serverInfo'}
-        #         redirect_url = f"{login_url}?{urlencode(params)}"
-        #         st.write(f"Необходимо ввести капчу. Откройте следующую ссылку и следуйте инструкциям:")
-        #         st.write(redirect_url)
-        #         if st.button("Подтвердить ввод капчи"):
-        #             st.rerun()
-        #     else:
-        #         st.error(f"Ошибка при создании заявки: {str(e)}")
 
     if improve != -1:
         issue_dict = {
             'project': {'id': admin_help},
-            'summary': f"Предложение по улучшению для {st.session_state.объект}",
+            'summary': f"Предложение по улучшению для {st.session_state.object}",
             'description': filtered_split_text[improve + 1].strip(", "),
             'issuetype': 'Задача'
         }
         issues_list.append(issue_dict)
-        # try:
-        #     test = JIRA.create_issue(st.session_state.jira,issue_dict)
-        # except Exception as e:
-        #     print(str(e))
-        # try:
-        #     test = JIRA.create_issue(st.session_state.jira, issue_dict)
-        # except Exception as e:
-        #     if "CAPTCHA_CHALLENGE" in str(e):
-        #         # Логика обработки капчи
-        #         login_url = 'https://jira03ika.data-integration.ru/login.jsp'
-        #         params = {'continue': '/rest/api/2/serverInfo'}
-        #         redirect_url = f"{login_url}?{urlencode(params)}"
-        #         st.write(f"Необходимо ввести капчу. Откройте следующую ссылку и следуйте инструкциям:")
-        #         st.write(redirect_url)
-        #         if st.button("Подтвердить ввод капчи"):
-        #             st.rerun()
-        #     else:
-        #         st.error(f"Ошибка при создании заявки: {str(e)}")
 
     if other != -1:
         issue_dict = {
                 'project': {'id': admin_help},
-                'summary': f"Другая проблема в {st.session_state.объект}",
+                'summary': f"Другая проблема в {st.session_state.object}",
                 'description': filtered_split_text[other + 1].strip(", "),
                 'issuetype': 'Задача'
             }
-
         issues_list.append(issue_dict)
-        try:
-            test = JIRA.create_issues(st.session_state.jira,issue_list)
-        except Exception as e:
-            if "CAPTCHA_CHALLENGE" in str(e):
-                # Логика обработки капчи
-                login_url = 'https://jira03ika.data-integration.ru/login.jsp'
-                params = {'continue': '/rest/api/2/serverInfo'}
-                redirect_url = f"{login_url}?{urlencode(params)}"
-                st.write(f"Необходимо ввести капчу. Откройте следующую ссылку и следуйте инструкциям:")
-                st.write(redirect_url)
-                if st.button("Подтвердить ввод капчи"):
-                    st.rerun()
-            else:
-                st.error(f"Ошибка при создании заявки: {str(e)}")
-        # try:
-        #     test = JIRA.create_issue(st.session_state.jira, issue_dict)
-        # except Exception as e:
-        #     if "CAPTCHA_CHALLENGE" in str(e):
-        #         # Логика обработки капчи
-        #         login_url = 'https://jira03ika.data-integration.ru/login.jsp'
-        #         params = {'continue': '/rest/api/2/serverInfo'}
-        #         redirect_url = f"{login_url}?{urlencode(params)}"
-        #         st.write(f"Необходимо ввести капчу. Откройте следующую ссылку и следуйте инструкциям:")
-        #         st.write(redirect_url)
-        #         if st.button("Подтвердить ввод капчи"):
-        #             st.rerun()
-        #     else:
-        #         st.error(f"Ошибка при создании заявки: {str(e)}")
+
+    try:
+        issues = jira.create_issues(issues_list)
+        for i in files:
+            bytesio = io.BytesIO(i.getvalue())
+            bytesio.seek(0)
+            jira.add_attachment(issue=issues[0]["issue"], attachment=bytesio, filename=i.name)
+    except Exception as e:
+        if "CAPTCHA_CHALLENGE" in str(e):
+            # Логика обработки капчи
+            login_url = os.getenv("JIRA_SERVER")+'login.jsp'
+            params = {'continue': '/rest/api/2/serverInfo'}
+            redirect_url = f"{login_url}?{urlencode(params)}"
+            st.write(f"Необходимо ввести капчу. Откройте следующую ссылку и следуйте инструкциям:")
+            st.write(redirect_url)
+            if st.button("Подтвердить ввод капчи"):
+                st.rerun()
+        else:
+            st.error(f"Ошибка при создании заявки: {str(e)}")
 
     st.rerun()
 
 
-def Объект_проверка() -> bool:
+def check_object() -> bool:
     """Процедура проверяет - выбран проблемный объект или нет.
     Возвращает `True` если выбран. Иначе - `False`"""
-    возврат = False
     try:
-        if st.session_state.объект: возврат = True
+        if st.session_state.object: return True
     except:
         st.empty()
-    finally:
-        return возврат
+        return False
 
 
-def Сборка_текста_заявки() -> None:
+def build_request() -> None:
     """Процедура собирает текст заявки из полей формы"""
-    st.session_state.текст_заявки = ""
+    st.session_state.request_body = ""
     i = 1
-    for _ in ПРОБЛЕМЫ["Техподдержка"]:
+    for _ in problems_dict["Техподдержка"]:
         if _ in st.session_state.проблемы:
-            if i == 1: st.session_state.текст_заявки += "В техподдержку:\n\n"
-            st.session_state.текст_заявки += str(i) + ") " + _ + "\n"
+            if i == 1: st.session_state.request_body += "В техподдержку:\n\n"
+            st.session_state.request_body += str(i) + ") " + _ + "\n"
             i += 1
     if i != 1:
-        st.session_state.текст_заявки += "\n"
+        st.session_state.request_body += "\n"
     i = 1
-    for _ in ПРОБЛЕМЫ["Обслуживание"]:
+    for _ in problems_dict["Обслуживание"]:
         if _ in st.session_state.проблемы:
-            if i == 1: st.session_state.текст_заявки += "Обслуживающему персоналу:\n\n"
-            st.session_state.текст_заявки += str(i) + ") " + _ + "\n"
+            if i == 1: st.session_state.request_body += "Обслуживающему персоналу:\n\n"
+            st.session_state.request_body += str(i) + ") " + _ + "\n"
             i += 1
     if i != 1:
-        st.session_state.текст_заявки += "\n"
+        st.session_state.request_body += "\n"
     i = 1
     if st.session_state.предложить_улучшение:
-        st.session_state.текст_заявки += ("Предлагается улучшение:\n\n" +
+        st.session_state.request_body += ("Предлагается улучшение:\n\n" +
                                           st.session_state.предложить_улучшение.strip() + "\n\n")
         i += 1
     if st.session_state.другое:
-        st.session_state.текст_заявки += "Другие предложения:\n\n" + st.session_state.другое.strip()
+        st.session_state.request_body += "Другие предложения:\n\n" + st.session_state.другое.strip()
     return None
 
 
-def Проверка_полей() -> bool:
+def check_fields() -> bool:
     """Процедура проверяет заполнение полей заявки и возвращает `True`,
     если поля заполнялись. В ином случае возвращает `False`"""
-    возврат = False
-    if st.session_state.текст_заявки:
-        возврат = True
-    elif len(st.session_state.файлы):
-        возврат = True
-    return возврат
+    if st.session_state.request_body or len(st.session_state.файлы):
+        return True
+    else:
+        return False
 
 
-def Проверки() -> None:
+def checks() -> None:
     """Процедура выполняет проверки заполнения полей формы, выбора
     проблемных объектов и сведений о пользователе. В тех случаях, когда
     отсутствуют исходные данные (наименование проблемного объекта,
@@ -323,28 +241,28 @@ def Проверки() -> None:
     файл) процедура переводит значение статуса заявки в состояние False
     """
     # Проверка выбора объекта
-    if Объект_проверка():
-        st.info("Проблемный объект: " + st.session_state.объект)
+    if check_object():
+        st.info("Проблемный объект: " + st.session_state.object)
         sleep(3)
-        st.session_state.заявка = True
+        st.session_state.request = True
     else:
         st.warning("Необходимо выбрать проблемный объект!")
         sleep(3)
-        st.session_state.заявка = False
+        st.session_state.request = False
     # Проверка заполнения полей заявки
-    if (not st.session_state.текст_заявки == "") or \
+    if (not st.session_state.request_body == "") or \
             (not len(st.session_state.файлы)):
-        if st.session_state.текст_заявки:
-            st.info("Текст заявки: \n" + st.session_state.текст_заявки)
+        if st.session_state.request_body:
+            st.info("Текст заявки: \n" + st.session_state.request_body)
         if len(st.session_state.файлы):
             st.info("Добавлено файлов: " + \
                     str(len(st.session_state.файлы)))
         sleep(3)
-        st.session_state.заявка = True
+        st.session_state.request = True
     else:
         st.warning("Необходимо заполнить поля заявки!")
         sleep(3)
-        st.session_state.заявка = False
+        st.session_state.request = False
     return None
 
 
@@ -359,7 +277,7 @@ if not cookies.ready():
     st.stop()
 
 @st.cache_data
-def Аутентификация() -> bool:
+def authentication() -> bool:
     """Процедура аутентификации пользователя в Jira.
     При нахождении пользователя в системе возвращает True.
     В обратном случае возвращает False"""
@@ -367,41 +285,40 @@ def Аутентификация() -> bool:
     try:
         token_auth = (os.getenv("TECH_LOGIN"), os.getenv("TECH_PASSWORD"))
         st.session_state.jira = JIRA(
-            options={"server": "https://jira03ika.data-integration.ru/"},
+            options={"server": os.getenv("JIRA_SERVER")},
             token_auth=token_auth,
+            async_=True,
+            max_retries=2
         )
 
-        st.session_state.аутентификация = True
-        if 'пользователь_информация' not in st.session_state:
-            st.session_state.пользователь_информация = \
+        st.session_state.auth = True
+        if 'user_info' not in st.session_state:
+            st.session_state.user_info = \
                 st.session_state.jira.myself()
-        st.session_state.пользователь = \
-            st.session_state.пользователь_информация.get(
+        st.session_state.user = \
+            st.session_state.user_info.get(
                 'displayName', "Аноним")
         return True
     except Exception as e:
-        #st.empty()
-        #st.error("Отказ в аутентификации пользователя:"+str(e))
         print(str(e))
         return False
-        #sleep(3)
 
 # Если пользователь не аутентифицирован, показываем форму входа
-if not st.session_state.аутентификация:
+if not st.session_state.auth:
     st.empty()
     c1, c2, c3 = st.columns([1, 4, 1])
     with c2.form("auth_form"):
         st.image("files/png/Jira.webp", use_container_width=True)
-        st.session_state.имя_пользователя = st.text_input("Имя")
+        st.session_state.user_name = st.text_input("Имя")
         remember_me = st.checkbox("Запомнить")
         submit_button = st.form_submit_button(
             "Вход", use_container_width=True)
         if submit_button:
-                st.session_state.аутентификация = True
+                st.session_state.auth = True
                 if remember_me:
                     # Устанавливаем cookie с сроком действия 30 дней
                     cookies['authenticated'] = 'true'
-                    cookies['username'] = st.session_state.имя_пользователя
+                    cookies['username'] = st.session_state.user_name
                     expires_at = int(time()) + 30 * 24 * 60 * 60  # 30 дней
                     cookies['expires_at'] = str(expires_at)
                     cookies.save()
@@ -436,12 +353,12 @@ else:
     </div>
     """, unsafe_allow_html=True)
     st.session_state.logout = False
-    st.header(f"Добро пожаловать, {st.session_state.имя_пользователя}!")
+    st.header(f"Добро пожаловать, {st.session_state.user_name}!")
     # Обработка выхода
     if st.session_state.logout:
         # Сброс данных сессии
-        st.session_state.аутентификация = False
-        print(st.session_state.аутентификация)
+        st.session_state.auth = False
+        print(st.session_state.auth)
         cookies['authenticated'] = 'false'
         cookies['username'] = ''
         cookies['expires_at'] = '0'
@@ -449,6 +366,8 @@ else:
 
     conn = psycopg2.connect(dbname='testdb', user='admin',
                             password='admin', host='nifi01-cons.data-integration.ru', port='5432')
+    #conn = psycopg2.connect(dbname='postgres', user='postgres',
+    #                        password='postgres', host='localhost', port='5432')
     cursor = conn.cursor()
     cursor.execute('SELECT * FROM itconcierge."Objects"')
     objects = cursor.fetchall()
@@ -458,140 +377,82 @@ else:
     technical_problems = cursor.fetchall()
     cursor.close()
     conn.close()
-    ОБЪЕКТЫ = []
+    objects_list = []
     technical_problems_arr = []
     service_problems_arr = []
     for i in objects:
-        ОБЪЕКТЫ.append(i[1])
+        objects_list.append(i[1])
     for i in service_problems:
         service_problems_arr.append(i[2])
     for i in technical_problems:
         technical_problems_arr.append(i[2])
-    # ОБЪЕКТЫ = [
-    #     "Переговорная «Алматы»",
-    #     "Переговорная «Тель-Авив»",
-    #     "Переговорная «Санкт-Петербург»",
-    #     "Кабинет Лихницкого П.В.",
-    #     "Кабинет Гиацинтова О.М.",
-    #     "Кабинет Косилова А.Е.",
-    #     "Кабинет Нечипоренко Е.Н.",
-    #     "Кабинет Финка Д.Н.",
-    #     "Принтер Бухгалтерия",
-    #     "Принтер HR",
-    #     "Принтер Sales",
-    #     "Принтер Reception",
-    #     "Принтер Back Office",
-    # ]
-    ПРОБЛЕМЫ = dict()
-    ПРОБЛЕМЫ["Техподдержка"] = technical_problems_arr
-    ПРОБЛЕМЫ["Обслуживание"] = service_problems_arr
-    # ПРОБЛЕМЫ = {
-    #     "Техподдержка": [
-    #         "Проблемы с оборудованием",
-    #         "Нет бумаги в принтере",
-    #         "Замена картриджа в принтере",
-    #         "Не работает ВКС",
-    #         "Интернет сбой", ],
-    #     "Обслуживание": [
-    #         "Нет питьевой воды",
-    #         "Необходима уборка",
-    #     ]}
 
-    if (not st.session_state.заявка_отправлена) and \
-            (not st.session_state.заявка):
+    problems_dict = dict()
+    problems_dict["Техподдержка"] = technical_problems_arr
+    problems_dict["Обслуживание"] = service_problems_arr
+
+    if (not st.session_state.request_sent) and \
+            (not st.session_state.request):
         with st.form('форма_заявка'):
-            if not Объект_проверка():
-                st.session_state.объект = st.segmented_control(
+            if not check_object():
+                st.session_state.object = st.segmented_control(
                     "Выберите объект",
-                    options=ОБЪЕКТЫ)
+                    options=objects_list)
                 st.divider()
             else:
-                if (not st.session_state.пользователь) or \
-                        (st.session_state.пользователь == "Аноним"):
+                if (not st.session_state.user) or \
+                        (st.session_state.user == "Аноним"):
                     st.subheader(
-                        st.session_state.объект,
+                        st.session_state.object,
                         divider=True)
                 else:
-                    слева, справа = st.columns([1, 1])
-                    слева.caption(st.session_state.объект)
+                    left, right = st.columns([1, 1])
+                    left.caption(st.session_state.object)
                     #справа.caption(f"Добро пожаловать, {st.session_state.пользователь}!")
             st.pills("Причина обращения", key='проблемы',
-                     options=ПРОБЛЕМЫ["Техподдержка"] + ПРОБЛЕМЫ["Обслуживание"],
+                     options=problems_dict["Техподдержка"] + problems_dict["Обслуживание"],
                      selection_mode="multi")
-            слева, справа = st.columns([1, 1])
-            слева.text_area("Предложить улучшение",
-                            key="предложить_улучшение")
-            справа.text_area("Другое", key="другое")
-            слева.text_input("Обратная связь", key="пользователь_телефон",
-                             placeholder="Укажите телефон для обратной связи")
-            справа.text_input("Электропочта", key="пользователь_электропочта",
-                              placeholder="Адрес электронной почты",
-                              label_visibility="hidden")
+            left, right = st.columns([1, 1])
+            left.text_area("Предложить улучшение",
+                           key="предложить_улучшение")
+            right.text_area("Другое", key="другое")
+            left.text_input("Обратная связь", key="пользователь_телефон",
+                            placeholder="Укажите телефон для обратной связи")
+            right.text_input("Электропочта", key="пользователь_электропочта",
+                             placeholder="Адрес электронной почты",
+                             label_visibility="hidden")
             st.file_uploader("Добавить вложение",
                              key="файлы",
                              type=["jpg", "jpeg", "png", "pdf", "doc",
                                    "docx", "xls", "xlsx"],
                              accept_multiple_files=True)
             if st.form_submit_button("Отправить заявку"):
-                Сборка_текста_заявки()
-                if not Объект_проверка():
+                build_request()
+                if not check_object():
                     st.error("Не выбран объект!")
                     sleep(1)
                 else:
-                    if not Проверка_полей():
+                    if not check_fields():
                         st.error("Форма не заполнена!")
                         sleep(1)
                     else:
                         st.info("Проверки выполнены...")
-                        st.info(st.session_state.текст_заявки)
+                        st.info(st.session_state.request_body)
                         st.info("Приложенных файлов: " + \
                                 str(len(st.session_state.файлы)))
-                        Отправить_заявку(st.session_state.текст_заявки, st.session_state.файлы)
+                        create_tasks(st.session_state.request_body, st.session_state.файлы)
                         sleep(3)
-                        #
-                        # Требуются login и password для входа в JIRA
-                        #
-                        # try:
-                        #     st.session_state.jira = JIRA(
-                        #         options={
-                        #             "server": "https://jira.data-integration.ru"},
-                        #         basic_auth=(
-                        #             st.secrets['JIRA']['login'],
-                        #             st.secrets['JIRA']['password'])
-                        #     )
-                        #     description = "ЗАЯВКА\n\n" + st.session_state.текст_заявки
-                        #     issue = st.session_state.jira.create_issue(fields={
-                        #         "project": {'key': 'JAT'},
-                        #         "summary": f"{st.session_state.объект}",
-                        #         "description": description,
-                        #         "issuetype": {'name': 'Task'},
-                        #         "customfield_10310": {"value": "DIS Group"}
-                        #     })
-                        #     # Прикрепление файлов
-                        #     if len(st.session_state.файлы):
-                        #         with st.spinner("Отправка файлов", show_time=True):
-                        #             for _ in st.session_state.файлы:
-                        #                 st.session_state.jira.add_attachment(
-                        #                     issue=issue.key,
-                        #                     attachment=BytesIO(_.getvalue()),
-                        #                     filename=_.name
-                        #                 )
-                        #     st.success("Заявка отправлена!")
-                        #     sleep(3)
-                        # except:
-                        #     st.error("ОШИБКА! Обратитесь к администратору!")
-                        #     sleep(3)
                 st.rerun()
-    elif st.session_state.заявка_отправлена:
+    elif st.session_state.request_sent:
         st.success("Ваша заявка отправлена!")
         if st.button("Новая заявка"):
-            st.session_state.заявка_отправлена = False
-            st.session_state.заявка = False
+            st.session_state.request_sent = False
+            st.session_state.request = False
             st.rerun()
     else:
         if st.button("Новая заявка"):
-            st.session_state.заявка_отправлена = False
-            st.session_state.заявка = False
+            st.session_state.request_sent = False
+            st.session_state.request = False
             st.rerun()
 
 with st.expander("Код приложения"):
