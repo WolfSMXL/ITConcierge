@@ -13,8 +13,22 @@ from time import sleep, time
 from jira.client import JIRA
 import psycopg2
 import re
+import csv
+from pathlib import Path
 
 load_dotenv()
+
+base_path = Path(__file__)
+objects_file_path = (base_path / "../files/csv/objects.csv").resolve()
+
+hide_decoration_bar_style = '''
+    <style>
+        [data-testid="stDecoration"] {
+            display: none;
+        }
+    </style>
+'''
+st.markdown(hide_decoration_bar_style, unsafe_allow_html=True)
 
 st.markdown('<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">', unsafe_allow_html=True)
 img_bytes = Path("files/png/DISg_colored.png").read_bytes()
@@ -39,7 +53,7 @@ st.set_page_config(
 # CSS для изменения цвета кнопки формы
 st.markdown("""
 <style>
-    .stFormSubmitButton>button {
+    .stButton>button {
         background-color: #00add7; /* DIS */
         color: white;
         border: none;
@@ -52,7 +66,7 @@ st.markdown("""
         cursor: pointer;
         border-radius: 8px;
     }
-    .stFormSubmitButton>button:hover {
+    .stButton>button:hover {
         background-color: #002f55; /* Темно-синий при наведении */
         color: #2c75ff;
     }
@@ -303,6 +317,7 @@ def authentication() -> bool:
         print(str(e))
         return False
 
+
 # Если пользователь не аутентифицирован, показываем форму входа
 if not st.session_state.auth:
     st.empty()
@@ -310,7 +325,7 @@ if not st.session_state.auth:
     with c2.form("auth_form"):
         st.image("files/png/Jira.webp", use_container_width=True)
         st.session_state.user_name = st.text_input("Имя")
-        remember_me = st.checkbox("Запомнить")
+        remember_me = st.checkbox("Запомнить", value=True)
         submit_button = st.form_submit_button(
             "Вход", use_container_width=True)
         if submit_button:
@@ -353,7 +368,8 @@ else:
     </div>
     """, unsafe_allow_html=True)
     st.session_state.logout = False
-    st.header(f"Добро пожаловать, {st.session_state.user_name}!")
+    user_login = JIRA.user(st.session_state.jira, st.session_state.user_name)
+    st.header(f"Добро пожаловать, {user_login}!")
     # Обработка выхода
     if st.session_state.logout:
         # Сброс данных сессии
@@ -364,85 +380,89 @@ else:
         cookies['expires_at'] = '0'
         cookies.save()
 
-    #conn = psycopg2.connect(dbname='testdb', user='admin',
-    #                        password='admin', host='nifi01-cons.data-integration.ru', port='5432')
-    conn = psycopg2.connect(dbname='postgres', user='postgres',
-                            password='postgres', host='localhost', port='5432')
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM itconcierge."Objects"')
-    objects = cursor.fetchall()
-    cursor.execute('SELECT * FROM itconcierge."Problems" where problem_type in (\'Обслуживание\')')
-    service_problems = cursor.fetchall()
-    cursor.execute('SELECT * FROM itconcierge."Problems" where problem_type in (\'Техническая\')')
-    technical_problems = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    objects_list = []
-    technical_problems_arr = []
-    service_problems_arr = []
-    for i in objects:
-        objects_list.append(i[1])
-    for i in service_problems:
-        service_problems_arr.append(i[2])
-    for i in technical_problems:
-        technical_problems_arr.append(i[2])
+    objects = []
+    object_categories = []
+    with objects_file_path.open(encoding="utf-8") as f:
+        objects_csv = csv.reader(f)
+        next(objects_csv)
+        for i in objects_csv:
+            objects.append(i[0])
+            object_categories.append(i[1])
+
+    service_problems_file_path = (base_path / "../files/csv/problems.csv").resolve()
+    service_problems = []
+    with service_problems_file_path.open(encoding="utf-8") as f:
+        service_problems_csv = csv.reader(f)
+        next(service_problems_csv)
+        for i in service_problems_csv:
+            if i[0] == "Обслуживание":
+                service_problems.append(i[1])
+
+    technical_problems_file_path = (base_path / "../files/csv/problems.csv").resolve()
+    technical_problems = []
+    with technical_problems_file_path.open(encoding="utf-8") as f:
+        technical_problems_csv = csv.reader(f)
+        next(technical_problems_csv)
+        for i in technical_problems_csv:
+            if i[0] == "Техническая":
+                technical_problems.append(i[1])
+
 
     problems_dict = dict()
-    problems_dict["Техподдержка"] = technical_problems_arr
-    problems_dict["Обслуживание"] = service_problems_arr
+    problems_dict["Техподдержка"] = technical_problems
+    problems_dict["Обслуживание"] = service_problems
 
-    if (not st.session_state.request_sent) and \
-            (not st.session_state.request):
-        with st.form('форма_заявка'):
+    if (not st.session_state.request_sent) and (not st.session_state.request):
+        #if not check_object():
+        st.divider()
+        object_category = st.selectbox("Выберите категорию объекта", options=set(object_categories))
+
+        objects_by_category = []
+
+        if object_category:
+            with objects_file_path.open(encoding="utf-8") as f:
+                objects_csv = csv.reader(f)
+                next(objects_csv)
+                for i in objects_csv:
+                    if i[1] == object_category:
+                        objects_by_category.append(i[0])
+
+        st.session_state.object = st.selectbox("Выберите объект", options=objects_by_category)
+
+        st.pills("Причина обращения", key='проблемы',
+                 options=problems_dict["Техподдержка"] + problems_dict["Обслуживание"],
+                 selection_mode="multi")
+        left, right = st.columns([1, 1])
+        left.text_area("Предложить улучшение",
+                       key="предложить_улучшение")
+        right.text_area("Другое", key="другое")
+        st.file_uploader("Добавить вложение",
+                         key="файлы",
+                         type=["jpg", "jpeg", "png", "pdf", "doc",
+                               "docx", "xls", "xlsx"],
+                         accept_multiple_files=True)
+
+        css = r''' <style> [data-testid="stForm"] {border: 0px} </style> '''
+        st.markdown(css, unsafe_allow_html=True)
+
+        if st.button("Отправить заявку"):
+            build_request()
             if not check_object():
-                st.session_state.object = st.segmented_control(
-                    "Выберите объект",
-                    options=objects_list)
-                st.divider()
+                st.error("Не выбран объект!")
+                sleep(1)
             else:
-                if (not st.session_state.user) or \
-                        (st.session_state.user == "Аноним"):
-                    st.subheader(
-                        st.session_state.object,
-                        divider=True)
-                else:
-                    left, right = st.columns([1, 1])
-                    left.caption(st.session_state.object)
-                    #справа.caption(f"Добро пожаловать, {st.session_state.пользователь}!")
-            st.pills("Причина обращения", key='проблемы',
-                     options=problems_dict["Техподдержка"] + problems_dict["Обслуживание"],
-                     selection_mode="multi")
-            left, right = st.columns([1, 1])
-            left.text_area("Предложить улучшение",
-                           key="предложить_улучшение")
-            right.text_area("Другое", key="другое")
-            left.text_input("Обратная связь", key="пользователь_телефон",
-                            placeholder="Укажите телефон для обратной связи")
-            right.text_input("Электропочта", key="пользователь_электропочта",
-                             placeholder="Адрес электронной почты",
-                             label_visibility="hidden")
-            st.file_uploader("Добавить вложение",
-                             key="файлы",
-                             type=["jpg", "jpeg", "png", "pdf", "doc",
-                                   "docx", "xls", "xlsx"],
-                             accept_multiple_files=True)
-            if st.form_submit_button("Отправить заявку"):
-                build_request()
-                if not check_object():
-                    st.error("Не выбран объект!")
+                if not check_fields():
+                    st.error("Форма не заполнена!")
                     sleep(1)
                 else:
-                    if not check_fields():
-                        st.error("Форма не заполнена!")
-                        sleep(1)
-                    else:
-                        st.info("Проверки выполнены...")
-                        st.info(st.session_state.request_body)
-                        st.info("Приложенных файлов: " + \
-                                str(len(st.session_state.файлы)))
-                        create_tasks(st.session_state.request_body, st.session_state.файлы)
-                        sleep(3)
-                st.rerun()
+                    st.info("Проверки выполнены...")
+                    st.info(st.session_state.request_body)
+                    st.info("Приложенных файлов: " + \
+                            str(len(st.session_state.файлы)))
+                    create_tasks(st.session_state.request_body, st.session_state.файлы)
+                    sleep(3)
+            st.rerun()
+        st.divider()
     elif st.session_state.request_sent:
         st.success("Ваша заявка отправлена!")
         if st.button("Новая заявка"):
@@ -454,11 +474,3 @@ else:
             st.session_state.request_sent = False
             st.session_state.request = False
             st.rerun()
-
-with st.expander("Код приложения"):
-    st.caption("Файл приложения `qr.py`")
-    with open("qr.py", 'r', encoding='utf8') as f: t = f.read()
-    st.code(t)
-    st.caption("Файл настройки приложения `.streamlit/config.toml`")
-    with open(".streamlit/config.toml", 'r', encoding='utf8') as f: t = f.read()
-    st.code(t, language="toml")
