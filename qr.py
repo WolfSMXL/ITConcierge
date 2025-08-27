@@ -13,6 +13,8 @@ from time import sleep, time
 from jira.client import JIRA
 import psycopg2
 import re
+import csv
+from pathlib import Path
 
 load_dotenv()
 
@@ -364,32 +366,38 @@ else:
         cookies['expires_at'] = '0'
         cookies.save()
 
-    #conn = psycopg2.connect(dbname='testdb', user='admin',
-    #                        password='admin', host='nifi01-cons.data-integration.ru', port='5432')
-    conn = psycopg2.connect(dbname='postgres', user='postgres',
-                            password='postgres', host='localhost', port='5432')
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM itconcierge."Objects"')
-    objects = cursor.fetchall()
-    cursor.execute('SELECT * FROM itconcierge."Problems" where problem_type in (\'Обслуживание\')')
-    service_problems = cursor.fetchall()
-    cursor.execute('SELECT * FROM itconcierge."Problems" where problem_type in (\'Техническая\')')
-    technical_problems = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    objects_list = []
-    technical_problems_arr = []
-    service_problems_arr = []
-    for i in objects:
-        objects_list.append(i[1])
-    for i in service_problems:
-        service_problems_arr.append(i[2])
-    for i in technical_problems:
-        technical_problems_arr.append(i[2])
+    base_path = Path(__file__)
+
+    objects_file_path = (base_path /  "../files/csv/objects.csv").resolve()
+    objects = []
+    with objects_file_path.open(encoding="utf-8") as f:
+        objects_csv = csv.reader(f)
+        next(objects_csv)
+        for i in objects_csv:
+            objects.append(i[0])
+
+    service_problems_file_path = (base_path / "../files/csv/problems.csv").resolve()
+    service_problems = []
+    with service_problems_file_path.open(encoding="utf-8") as f:
+        service_problems_csv = csv.reader(f)
+        next(service_problems_csv)
+        for i in service_problems_csv:
+            if i[0] == "Обслуживание":
+                service_problems.append(i[1])
+
+    technical_problems_file_path = (base_path / "../files/csv/problems.csv").resolve()
+    technical_problems = []
+    with technical_problems_file_path.open(encoding="utf-8") as f:
+        technical_problems_csv = csv.reader(f)
+        next(technical_problems_csv)
+        for i in technical_problems_csv:
+            if i[0] == "Техническая":
+                technical_problems.append(i[1])
+
 
     problems_dict = dict()
-    problems_dict["Техподдержка"] = technical_problems_arr
-    problems_dict["Обслуживание"] = service_problems_arr
+    problems_dict["Техподдержка"] = technical_problems
+    problems_dict["Обслуживание"] = service_problems
 
     if (not st.session_state.request_sent) and \
             (not st.session_state.request):
@@ -397,7 +405,7 @@ else:
             if not check_object():
                 st.session_state.object = st.segmented_control(
                     "Выберите объект",
-                    options=objects_list)
+                    options=objects)
                 st.divider()
             else:
                 if (not st.session_state.user) or \
@@ -416,11 +424,6 @@ else:
             left.text_area("Предложить улучшение",
                            key="предложить_улучшение")
             right.text_area("Другое", key="другое")
-            left.text_input("Обратная связь", key="пользователь_телефон",
-                            placeholder="Укажите телефон для обратной связи")
-            right.text_input("Электропочта", key="пользователь_электропочта",
-                             placeholder="Адрес электронной почты",
-                             label_visibility="hidden")
             st.file_uploader("Добавить вложение",
                              key="файлы",
                              type=["jpg", "jpeg", "png", "pdf", "doc",
