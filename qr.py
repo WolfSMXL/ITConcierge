@@ -20,6 +20,9 @@ load_dotenv()
 
 base_path = Path(__file__)
 objects_file_path = (base_path / "../files/csv/objects.csv").resolve()
+service_problems_file_path = (base_path / "../files/csv/problems.csv").resolve()
+technical_problems_file_path = (base_path / "../files/csv/problems.csv").resolve()
+objects_problems_file_path = (base_path / "../files/csv/problems_objects.csv").resolve()
 
 hide_decoration_bar_style = '''
     <style>
@@ -104,10 +107,19 @@ if not 'user' in st.session_state: st.session_state.user = st.query_params.get(
 # Имя пользователя
 if not 'user_name' in st.session_state: st.session_state.user_name = "Аноним"
 # Обработка выхода
-if "logout" not in st.session_state: st.session_state.logout = False
+#if "logout" not in st.session_state: st.session_state.logout = False
+if "other" not in st.session_state: st.session_state.other = None
 
 query_params = st.query_params
-if query_params.get("logout") == "true": st.session_state.logout = True
+if 'logout' not in query_params.keys():
+    query_params['logout'] = "false"
+
+if query_params['logout'] == "true":
+    st.session_state.logout = True
+else:
+    st.session_state.logout = False
+
+
 
 def create_tasks(body: str, files: list) -> None:
     jira = st.session_state.jira
@@ -133,7 +145,6 @@ def create_tasks(body: str, files: list) -> None:
         for i in range(0,len(filtered_split_text)):
             if filtered_split_text[i] == 'В техподдержку': tech = i
             if filtered_split_text[i] == 'Обслуживающему персоналу': service = i
-            if filtered_split_text[i] == 'Предлагается улучшение': improve = i
             if filtered_split_text[i] == 'Другие предложения': other = i
 
     except ValueError as v:
@@ -159,15 +170,6 @@ def create_tasks(body: str, files: list) -> None:
         }
         issues_list.append(issue_dict)
 
-    if improve != -1:
-        issue_dict = {
-            'project': {'id': admin_help},
-            'summary': f"Предложение по улучшению для {st.session_state.object}",
-            'description': filtered_split_text[improve + 1].strip(", "),
-            'issuetype': 'Задача'
-        }
-        issues_list.append(issue_dict)
-
     if other != -1:
         issue_dict = {
                 'project': {'id': admin_help},
@@ -179,10 +181,12 @@ def create_tasks(body: str, files: list) -> None:
 
     try:
         issues = jira.create_issues(issues_list)
-        for i in files:
-            bytesio = io.BytesIO(i.getvalue())
-            bytesio.seek(0)
-            jira.add_attachment(issue=issues[0]["issue"], attachment=bytesio, filename=i.name)
+        if len(files) != 0:
+            for i in issues:
+                for j in files:
+                    bytesio = io.BytesIO(j.getvalue())
+                    bytesio.seek(0)
+                    jira.add_attachment(issue=i["issue"], attachment=bytesio, filename=j.name)
     except Exception as e:
         if "CAPTCHA_CHALLENGE" in str(e):
             # Логика обработки капчи
@@ -194,7 +198,7 @@ def create_tasks(body: str, files: list) -> None:
             if st.button("Подтвердить ввод капчи"):
                 st.rerun()
         else:
-            st.error(f"Ошибка при создании заявки: {str(e)}")
+            print(f"Ошибка при создании заявки: {str(e)}")
 
     st.rerun()
 
@@ -214,7 +218,7 @@ def build_request() -> None:
     st.session_state.request_body = ""
     i = 1
     for _ in problems_dict["Техподдержка"]:
-        if _ in st.session_state.проблемы:
+        if _ in st.session_state.technical_problems:
             if i == 1: st.session_state.request_body += "В техподдержку:\n\n"
             st.session_state.request_body += str(i) + ") " + _ + "\n"
             i += 1
@@ -222,19 +226,15 @@ def build_request() -> None:
         st.session_state.request_body += "\n"
     i = 1
     for _ in problems_dict["Обслуживание"]:
-        if _ in st.session_state.проблемы:
+        if _ in st.session_state.service_problems:
             if i == 1: st.session_state.request_body += "Обслуживающему персоналу:\n\n"
             st.session_state.request_body += str(i) + ") " + _ + "\n"
             i += 1
     if i != 1:
         st.session_state.request_body += "\n"
     i = 1
-    if st.session_state.предложить_улучшение:
-        st.session_state.request_body += ("Предлагается улучшение:\n\n" +
-                                          st.session_state.предложить_улучшение.strip() + "\n\n")
-        i += 1
-    if st.session_state.другое:
-        st.session_state.request_body += "Другие предложения:\n\n" + st.session_state.другое.strip()
+    if st.session_state.other:
+        st.session_state.request_body += "Другие предложения:\n\n" + st.session_state.other.strip()
     return None
 
 
@@ -317,13 +317,13 @@ def authentication() -> bool:
         print(str(e))
         return False
 
-
+auth = cookies['authenticated']
 # Если пользователь не аутентифицирован, показываем форму входа
-if not st.session_state.auth:
+if not st.session_state.auth and cookies['authenticated'] == 'false':
     st.empty()
     c1, c2, c3 = st.columns([1, 4, 1])
     with c2.form("auth_form"):
-        st.image("files/png/Jira.webp", use_container_width=True)
+        #st.image("files/png/Jira.webp", use_container_width=True)
         st.session_state.user_name = st.text_input("Имя")
         remember_me = st.checkbox("Запомнить", value=True)
         submit_button = st.form_submit_button(
@@ -340,7 +340,7 @@ if not st.session_state.auth:
                     # Обновляем страницу, чтобы скрыть форму входа
                 st.rerun()
 
-# Если пользователь аутентифицирован, показываем основное содержимое
+# Если пользователь ёцирован, показываем основное содержимое
 else:
     # Кнопка, встроенная через HTML-форму + query-параметр
     st.markdown("""
@@ -363,12 +363,16 @@ else:
     <div id="fixed-logout">
         <form method="get">
             <input type="hidden" name="logout" value="true">
-            <button type="submit">Выйти</button>
+            <button>Выйти</button>
         </form>
     </div>
     """, unsafe_allow_html=True)
-    st.session_state.logout = False
-    user_login = JIRA.user(st.session_state.jira, st.session_state.user_name)
+    if cookies["authenticated"] == 'true':
+        user_login = JIRA.user(st.session_state.jira, cookies["username"])
+    elif st.session_state.user_name:
+        user_login = JIRA.user(st.session_state.jira, st.session_state.user_name)
+    else:
+        st.error("Пользователь не авторизован")
     st.header(f"Добро пожаловать, {user_login}!")
     # Обработка выхода
     if st.session_state.logout:
@@ -379,6 +383,8 @@ else:
         cookies['username'] = ''
         cookies['expires_at'] = '0'
         cookies.save()
+        st.query_params["logout"] = "false"
+        st.rerun()
 
     objects = []
     object_categories = []
@@ -389,7 +395,7 @@ else:
             objects.append(i[0])
             object_categories.append(i[1])
 
-    service_problems_file_path = (base_path / "../files/csv/problems.csv").resolve()
+
     service_problems = []
     with service_problems_file_path.open(encoding="utf-8") as f:
         service_problems_csv = csv.reader(f)
@@ -398,7 +404,7 @@ else:
             if i[0] == "Обслуживание":
                 service_problems.append(i[1])
 
-    technical_problems_file_path = (base_path / "../files/csv/problems.csv").resolve()
+
     technical_problems = []
     with technical_problems_file_path.open(encoding="utf-8") as f:
         technical_problems_csv = csv.reader(f)
@@ -407,43 +413,66 @@ else:
             if i[0] == "Техническая":
                 technical_problems.append(i[1])
 
-
     problems_dict = dict()
     problems_dict["Техподдержка"] = technical_problems
     problems_dict["Обслуживание"] = service_problems
 
     if (not st.session_state.request_sent) and (not st.session_state.request):
-        #if not check_object():
         st.divider()
         object_category = st.selectbox("Выберите категорию объекта", options=set(object_categories))
 
         objects_by_category = []
 
-        if object_category:
-            with objects_file_path.open(encoding="utf-8") as f:
-                objects_csv = csv.reader(f)
-                next(objects_csv)
-                for i in objects_csv:
-                    if i[1] == object_category:
-                        objects_by_category.append(i[0])
+        with objects_file_path.open(encoding="utf-8") as f:
+            objects_csv = csv.reader(f)
+            next(objects_csv)
+            for i in objects_csv:
+                if i[1] == object_category:
+                    objects_by_category.append(i[0])
 
         st.session_state.object = st.selectbox("Выберите объект", options=objects_by_category)
 
-        st.pills("Причина обращения", key='проблемы',
-                 options=problems_dict["Техподдержка"] + problems_dict["Обслуживание"],
-                 selection_mode="multi")
-        left, right = st.columns([1, 1])
-        left.text_area("Предложить улучшение",
-                       key="предложить_улучшение")
-        right.text_area("Другое", key="другое")
+        st.write("Причина обращения")
+
+        chosen_object = None
+
+        with objects_problems_file_path.open(encoding="utf-8") as f:
+            objects_problems_csv = csv.reader(f)
+            next(objects_problems_csv)
+            for i in objects_problems_csv:
+                if i[0] == st.session_state.object:
+                    chosen_object = i
+                    break
+            else:
+                st.error("Не найдено помещение в файле objects_problems.csv")
+
+        if len(chosen_object) != 0:
+            tech_obj_prob = list()
+            serv_obj_prob = list()
+
+            for i in chosen_object[1].split(";"):
+                if i in technical_problems:
+                    tech_obj_prob.append(i)
+                if i in service_problems:
+                    serv_obj_prob.append(i)
+
+            left, right = st.columns([1, 1])
+            tech_chosen_problems = left.pills("Техническая", key='technical_problems',
+                                          options=tech_obj_prob + ["Другое"],
+                                          selection_mode="multi")
+
+            serv_chosen_problems = right.pills("Сервисная", key='service_problems',
+                                        options=serv_obj_prob,
+                                        selection_mode="multi")
+
+            if "Другое" in tech_chosen_problems or "Другое" in serv_chosen_problems:
+                st.text_area("Другое", key="other")
+
         st.file_uploader("Добавить вложение",
                          key="файлы",
                          type=["jpg", "jpeg", "png", "pdf", "doc",
                                "docx", "xls", "xlsx"],
                          accept_multiple_files=True)
-
-        css = r''' <style> [data-testid="stForm"] {border: 0px} </style> '''
-        st.markdown(css, unsafe_allow_html=True)
 
         if st.button("Отправить заявку"):
             build_request()
