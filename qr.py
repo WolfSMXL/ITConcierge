@@ -368,10 +368,13 @@ else:
     </div>
     """, unsafe_allow_html=True)
     st.session_state.logout = False
+    saved_username = cookies.get('username', '')
+    if saved_username:
+        st.session_state.user_name = saved_username
     user_login = JIRA.user(st.session_state.jira, st.session_state.user_name).displayName
     cyrillic_user_login = translit(user_login, 'ru')
     corrections = [
-        ('X', 'кс'),  # X -> КС
+        ('аX', 'акс'),  # X -> КС
         ('Ыа', 'Я'),  # YA -> Я
     ]
 
