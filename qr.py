@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 import jira
+from transliterate import translit
 import requests
 import time
 from urllib.parse import urlencode
@@ -14,7 +15,18 @@ from jira.client import JIRA
 import psycopg2
 import re
 
+
 load_dotenv()
+
+hide_decoration_bar_style = '''
+    <style>
+        [data-testid="stDecoration"] {
+            display: none;
+        }
+    </style>
+'''
+
+st.markdown(hide_decoration_bar_style, unsafe_allow_html=True)
 
 st.markdown('<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">', unsafe_allow_html=True)
 img_bytes = Path("files/png/DISg_colored.png").read_bytes()
@@ -180,7 +192,7 @@ def create_tasks(body: str, files: list) -> None:
             if st.button("Подтвердить ввод капчи"):
                 st.rerun()
         else:
-            st.error(f"Ошибка при создании заявки: {str(e)}")
+            print(f"Ошибка при создании заявки: {str(e)}")
 
     st.rerun()
 
@@ -276,54 +288,57 @@ if not cookies.ready():
     st.spinner("Ожидание загрузки хлебных крошек", show_time=True)
     st.stop()
 
-@st.cache_data
-def authentication() -> bool:
-    """Процедура аутентификации пользователя в Jira.
-    При нахождении пользователя в системе возвращает True.
-    В обратном случае возвращает False"""
-    # Проверка имени пользователя и пароля
-    try:
-        token_auth = (os.getenv("TECH_LOGIN"), os.getenv("TECH_PASSWORD"))
-        st.session_state.jira = JIRA(
-            options={"server": os.getenv("JIRA_SERVER")},
-            token_auth=token_auth,
-            async_=True,
-            max_retries=2
-        )
-
-        st.session_state.auth = True
-        if 'user_info' not in st.session_state:
-            st.session_state.user_info = \
-                st.session_state.jira.myself()
-        st.session_state.user = \
-            st.session_state.user_info.get(
-                'displayName', "Аноним")
-        return True
-    except Exception as e:
-        print(str(e))
-        return False
+# @st.cache_data
+# def authentication() -> bool:
+#     """Процедура аутентификации пользователя в Jira.
+#     При нахождении пользователя в системе возвращает True.
+#     В обратном случае возвращает False"""
+#     # Проверка имени пользователя и пароля
+#     try:
+#         token_auth = (os.getenv("TECH_LOGIN"), os.getenv("TECH_PASSWORD"))
+#         st.session_state.jira = JIRA(
+#             options={"server": os.getenv("JIRA_SERVER")},
+#             token_auth=token_auth,
+#             async_=True,
+#             max_retries=2
+#         )
+#
+#         st.session_state.auth = True
+#         if 'user_info' not in st.session_state:
+#             st.session_state.user_info = \
+#                 st.session_state.jira.myself()
+#         st.session_state.user = \
+#             st.session_state.user_info.get(
+#                 'displayName', "Аноним")
+#         return True
+#     except Exception as e:
+#         print(str(e))
+#         return False
 
 # Если пользователь не аутентифицирован, показываем форму входа
 if not st.session_state.auth:
     st.empty()
     c1, c2, c3 = st.columns([1, 4, 1])
     with c2.form("auth_form"):
-        st.image("files/png/Jira.webp", use_container_width=True)
-        st.session_state.user_name = st.text_input("Имя")
-        remember_me = st.checkbox("Запомнить")
+        # st.image("files/png/Jira.webp", use_container_width=True)
+        st.session_state.user_name = st.text_input("Логин")
+        remember_me = st.checkbox("Запомнить", value=True)
         submit_button = st.form_submit_button(
             "Вход", use_container_width=True)
         if submit_button:
+            if st.session_state.jira:
                 st.session_state.auth = True
-                if remember_me:
-                    # Устанавливаем cookie с сроком действия 30 дней
-                    cookies['authenticated'] = 'true'
-                    cookies['username'] = st.session_state.user_name
-                    expires_at = int(time()) + 30 * 24 * 60 * 60  # 30 дней
-                    cookies['expires_at'] = str(expires_at)
-                    cookies.save()
-                    # Обновляем страницу, чтобы скрыть форму входа
-                st.rerun()
+            else:
+                st.error("Jira is null")
+            if remember_me:
+                # Устанавливаем cookie с сроком действия 30 дней
+                cookies['authenticated'] = 'true'
+                cookies['username'] = st.session_state.user_name
+                expires_at = int(time()) + 30 * 24 * 60 * 60  # 30 дней
+                cookies['expires_at'] = str(expires_at)
+                cookies.save()
+                # Обновляем страницу, чтобы скрыть форму входа
+            st.rerun()
 
 # Если пользователь аутентифицирован, показываем основное содержимое
 else:
@@ -353,7 +368,18 @@ else:
     </div>
     """, unsafe_allow_html=True)
     st.session_state.logout = False
-    st.header(f"Добро пожаловать, {st.session_state.user_name}!")
+    user_login = JIRA.user(st.session_state.jira, st.session_state.user_name).displayName
+    cyrillic_user_login = translit(user_login, 'ru')
+    corrections = [
+        ('X', 'кс'),  # X -> КС
+        ('Ыа', 'Я'),  # YA -> Я
+    ]
+
+    for old, new in corrections:
+        cyrillic_user_login = re.sub(old, new, cyrillic_user_login, flags=re.IGNORECASE)
+
+
+    st.header(f"Добро пожаловать, {cyrillic_user_login}!")
     # Обработка выхода
     if st.session_state.logout:
         # Сброс данных сессии
@@ -364,10 +390,10 @@ else:
         cookies['expires_at'] = '0'
         cookies.save()
 
-    #conn = psycopg2.connect(dbname='testdb', user='admin',
-    #                        password='admin', host='nifi01-cons.data-integration.ru', port='5432')
-    conn = psycopg2.connect(dbname='postgres', user='postgres',
-                            password='postgres', host='localhost', port='5432')
+    conn = psycopg2.connect(dbname='testdb', user='admin',
+                            password='admin', host='nifi01-cons.data-integration.ru', port='5432')
+    #conn = psycopg2.connect(dbname='postgres', user='postgres',
+    #                        password='postgres', host='localhost', port='5432')
     cursor = conn.cursor()
     cursor.execute('SELECT * FROM itconcierge."Objects"')
     objects = cursor.fetchall()
@@ -455,10 +481,10 @@ else:
             st.session_state.request = False
             st.rerun()
 
-with st.expander("Код приложения"):
-    st.caption("Файл приложения `qr.py`")
-    with open("qr.py", 'r', encoding='utf8') as f: t = f.read()
-    st.code(t)
-    st.caption("Файл настройки приложения `.streamlit/config.toml`")
-    with open(".streamlit/config.toml", 'r', encoding='utf8') as f: t = f.read()
-    st.code(t, language="toml")
+# with st.expander("Код приложения"):
+#     st.caption("Файл приложения `qr.py`")
+#     with open("qr.py", 'r', encoding='utf8') as f: t = f.read()
+#     st.code(t)
+#     st.caption("Файл настройки приложения `.streamlit/config.toml`")
+#     with open(".streamlit/config.toml", 'r', encoding='utf8') as f: t = f.read()
+#     st.code(t, language="toml")
