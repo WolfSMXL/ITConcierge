@@ -107,6 +107,18 @@ if "logout" not in st.session_state: st.session_state.logout = False
 query_params = st.query_params
 if query_params.get("logout") == "true": st.session_state.logout = True
 
+def authenticate_user(username):
+    try:
+        # Реализуйте свою логику проверки подлинности пользователя
+        # Здесь пример простой проверки
+        if username == "valid_user":
+            return True
+        else:
+            return False
+    except Exception as e:
+        print(str(e))
+        return False
+
 def create_tasks(body: str, files: list) -> None:
     jira = st.session_state.jira
     projects = jira.projects()
@@ -326,10 +338,10 @@ if not st.session_state.auth:
         submit_button = st.form_submit_button(
             "Вход", use_container_width=True)
         if submit_button:
-            if st.session_state.jira:
-                st.session_state.auth = True
-            else:
-                st.error("Jira is null")
+            #if authenticate_user(st.session_state.user_name):
+            st.session_state.auth = True
+            # else:
+            #     st.error("Jira is null")
             if remember_me:
                 # Устанавливаем cookie с сроком действия 30 дней
                 cookies['authenticated'] = 'true'
@@ -368,27 +380,20 @@ else:
     </div>
     """, unsafe_allow_html=True)
     st.session_state.logout = False
-    # saved_username = cookies.get('username', '')
-    # if saved_username:
-    #     st.session_state.user_name = saved_username
-    # cyrillic_user_login = translit(user_login, 'ru')
-    # corrections = [
-    #     ('аX', 'акс'),  # X -> КС
-    #     ('Ыа', 'Я'),  # YA -> Я
-    # ]
-    #
-    # for old, new in corrections:
-    #     cyrillic_user_login = re.sub(old, new, cyrillic_user_login, flags=re.IGNORECASE)
+    saved_username = cookies.get('username', '')
+    if saved_username:
+        st.session_state.user_name = saved_username
 
     user_login = JIRA.user(st.session_state.jira, st.session_state.user_name).displayName
     st.header(f"Добро пожаловать, {user_login}!")
+
     # Обработка выхода
     if st.session_state.logout:
         # Сброс данных сессии
         st.session_state.auth = False
         print(st.session_state.auth)
         cookies['authenticated'] = 'false'
-        cookies['username'] = ''
+        #cookies['username'] = ''
         cookies['expires_at'] = '0'
         cookies.save()
 
