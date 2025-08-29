@@ -107,17 +107,7 @@ if "logout" not in st.session_state: st.session_state.logout = False
 query_params = st.query_params
 if query_params.get("logout") == "true": st.session_state.logout = True
 
-def authenticate_user(username):
-    try:
-        # Реализуйте свою логику проверки подлинности пользователя
-        # Здесь пример простой проверки
-        if username == "valid_user":
-            return True
-        else:
-            return False
-    except Exception as e:
-        print(str(e))
-        return False
+
 
 def create_tasks(body: str, files: list) -> None:
     jira = st.session_state.jira
@@ -300,35 +290,30 @@ if not cookies.ready():
     st.spinner("Ожидание загрузки хлебных крошек", show_time=True)
     st.stop()
 
-# @st.cache_data
-# def authentication() -> bool:
-#     """Процедура аутентификации пользователя в Jira.
-#     При нахождении пользователя в системе возвращает True.
-#     В обратном случае возвращает False"""
-#     # Проверка имени пользователя и пароля
-#     try:
-#         token_auth = (os.getenv("TECH_LOGIN"), os.getenv("TECH_PASSWORD"))
-#         st.session_state.jira = JIRA(
-#             options={"server": os.getenv("JIRA_SERVER")},
-#             token_auth=token_auth,
-#             async_=True,
-#             max_retries=2
-#         )
-#
-#         st.session_state.auth = True
-#         if 'user_info' not in st.session_state:
-#             st.session_state.user_info = \
-#                 st.session_state.jira.myself()
-#         st.session_state.user = \
-#             st.session_state.user_info.get(
-#                 'displayName', "Аноним")
-#         return True
-#     except Exception as e:
-#         print(str(e))
-#         return False
+# Обработка выхода
+if st.session_state.logout:
+    # Сброс данных сессии
+    st.session_state.auth = False
+    cookies['authenticated'] = 'false'
+    cookies['username'] = ''
+    cookies['expires_at'] = '0'
+    cookies.save()
+    st.rerun()
+
+
+def auto_login():
+    # Пробуем достать логин из куки
+    stored_username = cookies.get('username', '')
+    if stored_username:
+        st.session_state.auth = True
+        st.session_state.user_name = stored_username
+        return True
+    return False
+
+auto_logged_in = auto_login()
 
 # Если пользователь не аутентифицирован, показываем форму входа
-if not st.session_state.auth:
+if not st.session_state.auth and not auto_logged_in:
     st.empty()
     c1, c2, c3 = st.columns([1, 4, 1])
     with c2.form("auth_form"):
@@ -393,9 +378,25 @@ else:
         st.session_state.auth = False
         print(st.session_state.auth)
         cookies['authenticated'] = 'false'
-        #cookies['username'] = ''
+        cookies['username'] = ''
         cookies['expires_at'] = '0'
         cookies.save()
+        st.session_state.clear()
+        st.rerun()
+
+    # Ваша кнопка выхода:
+    # if st.button("Выйти"):
+    #     # Очистим куки пользователя
+    #     cookies.delete_cookie('username')
+    #     cookies.delete_cookie('expires_at')
+    #     cookies.save()
+    #
+    #     # Сбрасываем состояние авторизации
+    #     st.session_state.auth = False
+    #
+    #     # Перезагружаем страницу для полного сброса
+    #     st.rerun()
+
 
     conn = psycopg2.connect(dbname='testdb', user='admin',
                             password='admin', host='nifi01-cons.data-integration.ru', port='5432')
