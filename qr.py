@@ -15,6 +15,7 @@ import psycopg2
 import re
 import csv
 from pathlib import Path
+from files.py.functions import cookies, init_session_state
 
 load_dotenv()
 
@@ -53,6 +54,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+
 # CSS для изменения цвета кнопки формы
 st.markdown("""
 <style>
@@ -76,50 +78,51 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Соединение с Jira
-if 'jira' not in st.session_state:
-    try:
-        token_auth = (os.getenv("TECH_LOGIN"), os.getenv("TECH_PASSWORD"))
-        test = os.getenv("JIRA_SERVER")
-        jira = JIRA(
-            options={"server": os.getenv("JIRA_SERVER")},
-            basic_auth=token_auth
-        )
-    except Exception as e:
-        print(str(e))
-        jira = None
-    st.session_state.jira = jira
-# Статус заявки
-if not 'request' in st.session_state: st.session_state.request = False
-# Счётчик попыток создания заявок в одном сеансе
-if not 'counter' in st.session_state: st.session_state.counter = 0
-# Текст заявки
-if not 'request_body' in st.session_state: st.session_state.request_body = ''
-# Статус аутентификации
-if not 'auth' in st.session_state: st.session_state.auth = False
-# Статус заявки
-if not 'request_sent' in st.session_state: st.session_state.request_sent = False
-# Название проблемного объекта
-if not 'object' in st.session_state: st.session_state.object = st.query_params.get('object', None)
-# Пользователь
-if not 'user' in st.session_state: st.session_state.user = st.query_params.get(
-    'user', "Аноним")
-# Имя пользователя
-if not 'user_name' in st.session_state: st.session_state.user_name = "Аноним"
-# Обработка выхода
-#if "logout" not in st.session_state: st.session_state.logout = False
-if "other" not in st.session_state: st.session_state.other = None
-
-query_params = st.query_params
-if 'logout' not in query_params.keys():
-    query_params['logout'] = "false"
-
-if query_params['logout'] == "true":
-    st.session_state.logout = True
-else:
-    st.session_state.logout = False
 
 
+# # Соединение с Jira
+# if 'jira' not in st.session_state:
+#     try:
+#         token_auth = (os.getenv("TECH_LOGIN"), os.getenv("TECH_PASSWORD"))
+#         test = os.getenv("JIRA_SERVER")
+#         jira = JIRA(
+#             options={"server": os.getenv("JIRA_SERVER")},
+#             basic_auth=token_auth
+#         )
+#     except Exception as e:
+#         print(str(e))
+#         jira = None
+#     st.session_state.jira = jira
+# # Статус заявки
+# if not 'request' in st.session_state: st.session_state.request = False
+# # Счётчик попыток создания заявок в одном сеансе
+# if not 'counter' in st.session_state: st.session_state.counter = 0
+# # Текст заявки
+# if not 'request_body' in st.session_state: st.session_state.request_body = ''
+# # Статус аутентификации
+# if not 'auth' in st.session_state: st.session_state.auth = False
+# # Статус заявки
+# if not 'request_sent' in st.session_state: st.session_state.request_sent = False
+# # Название проблемного объекта
+# if not 'object' in st.session_state: st.session_state.object = st.query_params.get('object', None)
+# # Пользователь
+# if not 'user' in st.session_state: st.session_state.user = st.query_params.get(
+#     'user', "Аноним")
+# # Имя пользователя
+# if not 'user_name' in st.session_state: st.session_state.user_name = "Аноним"
+# # Обработка выхода
+# if "other" not in st.session_state: st.session_state.other = None
+#
+# query_params = st.query_params
+# if 'logout' not in query_params.keys():
+#     query_params['logout'] = "false"
+#
+# if query_params['logout'] == "true":
+#     st.session_state.logout = True
+# else:
+#     st.session_state.logout = False
+
+init_session_state()
 
 def create_tasks(body: str, files: list) -> None:
     jira = st.session_state.jira
@@ -279,47 +282,49 @@ def checks() -> None:
         st.session_state.request = False
     return None
 
-
-# Создание экземпляра менеджера куков
-cookies = EncryptedCookieManager(
-    prefix=st.secrets["Крошки"]["префикс"],
-    password=os.environ.get("COOKIES_PASSWORD", st.secrets["Крошки"]["пароль"])
-)
-
-if not cookies.ready():
-    st.spinner("Ожидание загрузки хлебных крошек", show_time=True)
-    st.stop()
-
-@st.cache_data
-def authentication() -> bool:
-    """Процедура аутентификации пользователя в Jira.
-    При нахождении пользователя в системе возвращает True.
-    В обратном случае возвращает False"""
-    # Проверка имени пользователя и пароля
-    try:
-        token_auth = (os.getenv("TECH_LOGIN"), os.getenv("TECH_PASSWORD"))
-        st.session_state.jira = JIRA(
-            options={"server": os.getenv("JIRA_SERVER")},
-            token_auth=token_auth,
-            async_=True,
-            max_retries=2
-        )
-
+def auto_login():
+    # Пробуем достать логин из куки
+    stored_username = cookies.get('username', '')
+    if stored_username:
         st.session_state.auth = True
-        if 'user_info' not in st.session_state:
-            st.session_state.user_info = \
-                st.session_state.jira.myself()
-        st.session_state.user = \
-            st.session_state.user_info.get(
-                'displayName', "Аноним")
+        st.session_state.user_name = stored_username
         return True
-    except Exception as e:
-        print(str(e))
-        return False
+    return False
 
-auth = cookies['authenticated']
+auto_logged_in = auto_login()
+
+
+# @st.cache_data
+# def authentication() -> bool:
+#     """Процедура аутентификации пользователя в Jira.
+#     При нахождении пользователя в системе возвращает True.
+#     В обратном случае возвращает False"""
+#     # Проверка имени пользователя и пароля
+#     try:
+#         token_auth = (os.getenv("TECH_LOGIN"), os.getenv("TECH_PASSWORD"))
+#         st.session_state.jira = JIRA(
+#             options={"server": os.getenv("JIRA_SERVER")},
+#             token_auth=token_auth,
+#             async_=True,
+#             max_retries=2
+#         )
+#
+#         st.session_state.auth = True
+#         if 'user_info' not in st.session_state:
+#             st.session_state.user_info = \
+#                 st.session_state.jira.myself()
+#         st.session_state.user = \
+#             st.session_state.user_info.get(
+#                 'displayName', "Аноним")
+#         return True
+#     except Exception as e:
+#         print(str(e))
+#         return False
+
+
 # Если пользователь не аутентифицирован, показываем форму входа
-if not st.session_state.auth and cookies['authenticated'] == 'false':
+
+if not st.session_state.auth and not auto_logged_in:
     st.empty()
     c1, c2, c3 = st.columns([1, 4, 1])
     with c2.form("auth_form"):
@@ -367,23 +372,29 @@ else:
         </form>
     </div>
     """, unsafe_allow_html=True)
-    if cookies["authenticated"] == 'true':
-        user_login = JIRA.user(st.session_state.jira, cookies["username"])
-    elif st.session_state.user_name:
-        user_login = JIRA.user(st.session_state.jira, st.session_state.user_name)
-    else:
-        st.error("Пользователь не авторизован")
+
+    saved_username = cookies.get('username', '')
+    if saved_username:
+        st.session_state.user_name = saved_username
+
+    # if cookies["authenticated"] == 'true':
+    #     user_login = JIRA.user(st.session_state.jira, cookies["username"])
+    # elif st.session_state.user_name:
+    #     user_login = JIRA.user(st.session_state.jira, st.session_state.user_name)
+    # else:
+    #     st.error("Пользователь не авторизован")
+
+    user_login = JIRA.user(st.session_state.jira, st.session_state.user_name).displayName
     st.header(f"Добро пожаловать, {user_login}!")
     # Обработка выхода
     if st.session_state.logout:
         # Сброс данных сессии
         st.session_state.auth = False
-        print(st.session_state.auth)
         cookies['authenticated'] = 'false'
         cookies['username'] = ''
         cookies['expires_at'] = '0'
         cookies.save()
-        st.query_params["logout"] = "false"
+        st.query_params.pop("logout")
         st.rerun()
 
     objects = []
