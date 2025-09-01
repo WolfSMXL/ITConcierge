@@ -2,3 +2,4 @@
 runOnSave=true
 [client]
 toolbarMode = "minimal"
+showSidebarNavigation = false

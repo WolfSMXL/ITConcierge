@@ -1,4 +1,4 @@
-from extra_streamlit_components import CookieManager
+#from extra_streamlit_components import CookieManager
 from jira import JIRA
 import streamlit as st
 import uuid
