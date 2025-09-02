@@ -1,3 +1,4 @@
+import base64
 import csv
 import io
 import os
@@ -28,6 +29,30 @@ def hide_sidebar():
     """, unsafe_allow_html=True)
 
 def setup_page_config():
+    hide_decoration_bar_style = '''
+        <style>
+            [data-testid="stDecoration"] {
+                display: none;
+            }
+        </style>
+    '''
+    st.markdown(hide_decoration_bar_style, unsafe_allow_html=True)
+
+    st.markdown(
+        '<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">',
+        unsafe_allow_html=True)
+    img = Path(__file__).parent.parent / "png/DISg_colored.png"
+    img_bytes = img.read_bytes()
+    encoded_img = base64.b64encode(img_bytes).decode()
+    img_html = "data:image/png;base64,{}".format(encoded_img)
+    st.markdown(f"""
+    <nav class="navbar fixed-top navbar-expand-lg navbar-dark">
+      <a href="https://www.dis-group.ru">
+        <img src="{img_html}" width=30 class="navbar-brand" target="_blank"></img>
+      </a>
+    </nav>
+    """, unsafe_allow_html=True)
+
     st.set_page_config(
         page_title="Admin, Help!",
         page_icon="files/ico/DISg_colored.ico",
@@ -225,15 +250,18 @@ def init_session_state():
     # Соединение с Jira
     if 'jira' not in st.session_state:
         try:
-            token_auth = (os.getenv("TECH_LOGIN"), os.getenv("TECH_PASSWORD"))
+            basic_auth = (os.getenv("TECH_LOGIN"), os.getenv("TECH_PASSWORD"))
             jira = JIRA(
                 options={"server": os.getenv("JIRA_SERVER")},
-                basic_auth=token_auth
+                basic_auth=basic_auth
             )
         except Exception as e:
             print(str(e))
             jira = None
-        st.session_state.jira = jira
+        if jira:
+            st.session_state.jira = jira
+        else:
+            st.error("Не удалось подключиться к JIRA")
     # Статус заявки
     if not 'request' in st.session_state: st.session_state.request = False
     # Счётчик попыток создания заявок в одном сеансе
@@ -253,6 +281,8 @@ def init_session_state():
     if not 'user_name' in st.session_state: st.session_state.user_name = "Аноним"
     # Обработка выхода
     if "other" not in st.session_state: st.session_state.other = None
+    if "cookies" not in st.session_state:
+        init_cookies()
     query_params = st.query_params
     if 'logout' not in query_params.keys():
         query_params['logout'] = "false"
@@ -272,13 +302,26 @@ def init_cookies():
         st.spinner("Ожидание загрузки хлебных крошек", show_time=True)
         st.stop()
 
-    return cookies
+    st.session_state.cookies = cookies
 
-cookies = init_cookies()
+def auto_login():
+    time.sleep(0.5)
+    cookies = st.session_state.cookies
+    # Пробуем достать логин из куки
+    stored_username = cookies.get('username', '')
+    if stored_username:
+        st.session_state.auth = True
+        st.session_state.user_name = stored_username
+        return True
+    return False
+
+
 
 def request(object: str):
+    cookies = st.session_state.cookies
+    auto_logged_in = auto_login()
     # Если пользователь не аутентифицирован, показываем форму входа
-    if not st.session_state.auth and cookies['authenticated'] == 'false':
+    if not st.session_state.auth and not auto_logged_in:
         st.empty()
         c1, c2, c3 = st.columns([1, 4, 1])
         with c2.form("auth_form"):
@@ -296,6 +339,7 @@ def request(object: str):
                     expires_at = int(time()) + 30 * 24 * 60 * 60  # 30 дней
                     cookies['expires_at'] = str(expires_at)
                     cookies.save()
+                    st.session_state.cookies = cookies
                     # Обновляем страницу, чтобы скрыть форму входа
                 st.rerun()
     else:
@@ -329,12 +373,11 @@ def request(object: str):
                 </form>
             </div>
             """, unsafe_allow_html=True)
-        if cookies["authenticated"] == 'true':
-            user_login = JIRA.user(st.session_state.jira, cookies["username"])
-        elif st.session_state.user_name:
-            user_login = JIRA.user(st.session_state.jira, st.session_state.user_name)
-        else:
-            st.error("Пользователь не авторизован")
+        saved_username = cookies.get('username', '')
+        if saved_username:
+            st.session_state.user_name = saved_username
+
+        user_login = JIRA.user(st.session_state.jira, st.session_state.user_name).displayName
         st.header(f"Добро пожаловать, {user_login}!")
         # Обработка выхода
         if st.session_state.logout:
@@ -344,6 +387,7 @@ def request(object: str):
             cookies['username'] = ''
             cookies['expires_at'] = '0'
             cookies.save()
+            st.session_state.cookies = cookies
             st.query_params["logout"] = "false"
             st.switch_page("qr.py")
 
@@ -403,12 +447,21 @@ def request(object: str):
                                                   options=tech_obj_prob,
                                                   selection_mode="multi")
 
-                serv_chosen_problems = right.pills("Сервисная", key='service_problems',
+                serv_chosen_problems = right.pills("Хозяйственная", key='service_problems',
                                                    options=serv_obj_prob + ["Другое"],
                                                    selection_mode="multi")
 
                 if "Другое" in tech_chosen_problems or "Другое" in serv_chosen_problems:
                     st.text_area("Другое", key="other")
+
+            css = """
+                    <style>
+                    [data-testid="stFileUploadDropzone"] div div::before {
+                        content: "Drop your files here, or click to browse!";
+                    }
+                    </style>
+                    """
+            st.markdown(css, unsafe_allow_html=True)
 
             st.file_uploader("Добавить вложение",
                              key="файлы",

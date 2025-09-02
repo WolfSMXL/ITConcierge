@@ -1,21 +1,17 @@
 import base64
+import csv
 import io
 import os
-from pathlib import Path
-from dotenv import load_dotenv
-import jira
-import requests
-import time
-from urllib.parse import urlencode
-import streamlit as st
-from streamlit_cookies_manager import EncryptedCookieManager
-from time import sleep, time
-from jira.client import JIRA
-import psycopg2
 import re
-import csv
 from pathlib import Path
-from files.py.functions import cookies, init_session_state
+from time import sleep, time
+from urllib.parse import urlencode
+
+import streamlit as st
+from dotenv import load_dotenv
+from jira.client import JIRA
+
+from files.py.functions import init_session_state
 
 load_dotenv()
 
@@ -87,8 +83,11 @@ st.markdown("""
 #         test = os.getenv("JIRA_SERVER")
 #         jira = JIRA(
 #             options={"server": os.getenv("JIRA_SERVER")},
-#             basic_auth=token_auth
+#             basic_auth=token_auth,
+#             async_=True,
+#             max_retries=2
 #         )
+#         print(jira)
 #     except Exception as e:
 #         print(str(e))
 #         jira = None
@@ -155,6 +154,9 @@ def create_tasks(body: str, files: list) -> None:
 
     issues_list = []
 
+    user = JIRA.user(st.session_state.jira, st.session_state.user_name)
+
+
     if tech != -1:
         issue_dict = {
             'project': {'id': admin_help},
@@ -174,16 +176,25 @@ def create_tasks(body: str, files: list) -> None:
         issues_list.append(issue_dict)
 
     if other != -1:
-        issue_dict = {
+        issue_other_ah = {
                 'project': {'id': admin_help},
                 'summary': f"Другая проблема в {st.session_state.object}",
                 'description': filtered_split_text[other + 1].strip(", "),
                 'issuetype': 'Задача'
             }
-        issues_list.append(issue_dict)
+        issue_other_bs = {
+                'project': {'id': business_support},
+                'summary': f"Другая проблема в {st.session_state.object}",
+                'description': filtered_split_text[other + 1].strip(", "),
+                'issuetype': 'Задача'
+            }
+        issues_list.append(issue_other_ah)
+        issues_list.append(issue_other_bs)
 
     try:
         issues = jira.create_issues(issues_list)
+        for i in issues:
+            i["issue"].update(reporter={'name': st.session_state.user_name})
         if len(files) != 0:
             for i in issues:
                 for j in files:
@@ -283,6 +294,8 @@ def checks() -> None:
     return None
 
 def auto_login():
+    sleep(0.5)
+    cookies = st.session_state.cookies
     # Пробуем достать логин из куки
     stored_username = cookies.get('username', '')
     if stored_username:
@@ -292,7 +305,6 @@ def auto_login():
     return False
 
 auto_logged_in = auto_login()
-
 
 # @st.cache_data
 # def authentication() -> bool:
@@ -336,12 +348,14 @@ if not st.session_state.auth and not auto_logged_in:
         if submit_button:
                 st.session_state.auth = True
                 if remember_me:
+                    cookies = st.session_state.cookies
                     # Устанавливаем cookie с сроком действия 30 дней
                     cookies['authenticated'] = 'true'
                     cookies['username'] = st.session_state.user_name
                     expires_at = int(time()) + 30 * 24 * 60 * 60  # 30 дней
                     cookies['expires_at'] = str(expires_at)
                     cookies.save()
+                    st.session_state.cookies = cookies
                     # Обновляем страницу, чтобы скрыть форму входа
                 st.rerun()
 
@@ -372,19 +386,15 @@ else:
         </form>
     </div>
     """, unsafe_allow_html=True)
-
+    cookies = st.session_state.cookies
     saved_username = cookies.get('username', '')
     if saved_username:
         st.session_state.user_name = saved_username
-
-    # if cookies["authenticated"] == 'true':
-    #     user_login = JIRA.user(st.session_state.jira, cookies["username"])
-    # elif st.session_state.user_name:
-    #     user_login = JIRA.user(st.session_state.jira, st.session_state.user_name)
-    # else:
-    #     st.error("Пользователь не авторизован")
-
-    user_login = JIRA.user(st.session_state.jira, st.session_state.user_name).displayName
+    try:
+        user_login = JIRA.user(st.session_state.jira, st.session_state.user_name).displayName
+    except Exception as e:
+        user_login = "Аноним"
+        print(str(e))
     st.header(f"Добро пожаловать, {user_login}!")
     # Обработка выхода
     if st.session_state.logout:
@@ -394,6 +404,7 @@ else:
         cookies['username'] = ''
         cookies['expires_at'] = '0'
         cookies.save()
+        st.session_state.cookies = cookies
         st.query_params.pop("logout")
         st.rerun()
 
@@ -469,21 +480,44 @@ else:
 
             left, right = st.columns([1, 1])
             tech_chosen_problems = left.pills("Техническая", key='technical_problems',
-                                          options=tech_obj_prob + ["Другое"],
+                                          options=tech_obj_prob,
                                           selection_mode="multi")
 
-            serv_chosen_problems = right.pills("Сервисная", key='service_problems',
-                                        options=serv_obj_prob,
+            serv_chosen_problems = right.pills("Хозяйственная", key='service_problems',
+                                        options=serv_obj_prob + ["Другое"],
                                         selection_mode="multi")
 
             if "Другое" in tech_chosen_problems or "Другое" in serv_chosen_problems:
                 st.text_area("Другое", key="other")
+
+
+
 
         st.file_uploader("Добавить вложение",
                          key="файлы",
                          type=["jpg", "jpeg", "png", "pdf", "doc",
                                "docx", "xls", "xlsx"],
                          accept_multiple_files=True)
+
+        hide_label = """
+        <style>
+
+        [data-testid='stFileUploaderDropzoneInstructions'] > div > span {
+        display: none;
+        }
+
+        [data-testid='stFileUploaderDropzoneInstructions'] > div::before {
+        content: 'Приложите файл';
+        }
+
+        [data-testid='stFileDropzoneInstructions'] { text-indent: -9999px; line-height: 0; } [
+        
+        data-testid='stFileDropzoneInstructions']::after { line-height: initial; 
+        content: "Лимит 200 МБ на файл"; text-indent: 0; }
+
+        </style>
+        """
+        st.markdown(hide_label, unsafe_allow_html=True)
 
         if st.button("Отправить заявку"):
             build_request()
