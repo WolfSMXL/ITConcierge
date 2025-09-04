@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from urllib.parse import urlencode
 import streamlit as st
-import time
+from time import sleep, time
 from jira import JIRA
 from streamlit_cookies_manager import EncryptedCookieManager
 
@@ -152,12 +152,16 @@ def create_tasks(body: str, files: list) -> None:
 
     try:
         issues = jira.create_issues(issues_list)
+        if not st.session_state.anonymous:
+            for i in issues:
+                i["issue"].update(reporter={'name': st.session_state.user_name})
         if len(files) != 0:
             for i in issues:
                 for j in files:
                     bytesio = io.BytesIO(j.getvalue())
                     bytesio.seek(0)
                     jira.add_attachment(issue=i["issue"], attachment=bytesio, filename=j.name)
+        request_info(issues)
     except Exception as e:
         if "CAPTCHA_CHALLENGE" in str(e):
             # Логика обработки капчи
@@ -171,7 +175,6 @@ def create_tasks(body: str, files: list) -> None:
         else:
             print(f"Ошибка при создании заявки: {str(e)}")
 
-    st.rerun()
 
 def build_request(problems_dict) -> None:
     """Процедура собирает текст заявки из полей формы"""
@@ -224,11 +227,11 @@ def checks() -> None:
     # Проверка выбора объекта
     if check_object():
         st.info("Проблемный объект: " + st.session_state.object)
-        time.sleep(3)
+        sleep(3)
         st.session_state.request = True
     else:
         st.warning("Необходимо выбрать проблемный объект!")
-        time.sleep(3)
+        sleep(3)
         st.session_state.request = False
     # Проверка заполнения полей заявки
     if (not st.session_state.request_body == "") or \
@@ -238,11 +241,11 @@ def checks() -> None:
         if len(st.session_state.файлы):
             st.info("Добавлено файлов: " + \
                     str(len(st.session_state.файлы)))
-        time.sleep(3)
+        sleep(3)
         st.session_state.request = True
     else:
         st.warning("Необходимо заполнить поля заявки!")
-        time.sleep(3)
+        sleep(3)
         st.session_state.request = False
     return None
 
@@ -305,7 +308,7 @@ def init_cookies():
     st.session_state.cookies = cookies
 
 def auto_login():
-    time.sleep(0.5)
+    sleep(0.5)
     cookies = st.session_state.cookies
     # Пробуем достать логин из куки
     stored_username = cookies.get('username', '')
@@ -315,7 +318,17 @@ def auto_login():
         return True
     return False
 
+@st.dialog("Информация", on_dismiss="rerun")
+def request_info(issues):
+    st.write("Задачи успешно созданы по заявке:")
+    issues_text = ""
+    for i in issues:
+        issues_text += f"{str(i['issue'].key)}: {os.getenv('JIRA_SERVER')}browse/{i['issue']}\n"
+    with st.container():
+        st.write(issues_text)
 
+    if st.button("ОК"):
+        st.rerun()
 
 def request(object: str):
     cookies = st.session_state.cookies
@@ -345,6 +358,7 @@ def request(object: str):
     else:
         """Форма создания заявки с st.pills и множественным выбором"""
         base_path = Path(__file__).parent
+        objects_file_path = (base_path / "../csv/objects.csv").resolve()
         service_problems_file_path = (base_path / "../csv/problems.csv").resolve()
         technical_problems_file_path = (base_path / "../csv/problems.csv").resolve()
         objects_problems_file_path = (base_path / "../csv/problems_objects.csv").resolve()
@@ -377,7 +391,12 @@ def request(object: str):
         if saved_username:
             st.session_state.user_name = saved_username
 
-        user_login = JIRA.user(st.session_state.jira, st.session_state.user_name).displayName
+        try:
+            user_login = JIRA.user(st.session_state.jira, st.session_state.user_name).displayName
+            st.session_state.anonymous = False
+        except Exception as e:
+            user_login = "Аноним"
+            st.session_state.anonymous = True
         st.header(f"Добро пожаловать, {user_login}!")
         # Обработка выхода
         if st.session_state.logout:
@@ -390,6 +409,15 @@ def request(object: str):
             st.session_state.cookies = cookies
             st.query_params["logout"] = "false"
             st.switch_page("qr.py")
+
+        objects = []
+        object_categories = []
+        with objects_file_path.open(encoding="utf-8") as f:
+            objects_csv = csv.reader(f)
+            next(objects_csv)
+            for i in objects_csv:
+                objects.append(i[0])
+                object_categories.append(i[1])
 
         service_problems = []
         with service_problems_file_path.open(encoding="utf-8") as f:
@@ -414,9 +442,23 @@ def request(object: str):
         if (not st.session_state.request_sent) and (not st.session_state.request):
             st.divider()
 
-            st.session_state.object = object
+            if object != "":
+                st.session_state.object = object
+                st.subheader(st.session_state.object, divider=True)
+            else:
+                object_category = st.selectbox("Выберите категорию объекта", options=set(object_categories))
+                objects_by_category = []
 
-            st.subheader(st.session_state.object, divider=True)
+                with objects_file_path.open(encoding="utf-8") as f:
+                    objects_csv = csv.reader(f)
+                    next(objects_csv)
+                    for i in objects_csv:
+                        if i[1] == object_category:
+                            objects_by_category.append(i[0])
+
+                st.session_state.object = st.selectbox("Выберите объект", options=objects_by_category)
+
+
 
             st.write("Причина обращения")
 
@@ -454,38 +496,41 @@ def request(object: str):
                 if "Другое" in tech_chosen_problems or "Другое" in serv_chosen_problems:
                     st.text_area("Другое", key="other")
 
-            css = """
-                    <style>
-                    [data-testid="stFileUploadDropzone"] div div::before {
-                        content: "Drop your files here, or click to browse!";
-                    }
-                    </style>
-                    """
-            st.markdown(css, unsafe_allow_html=True)
-
             st.file_uploader("Добавить вложение",
                              key="файлы",
                              type=["jpg", "jpeg", "png", "pdf", "doc",
                                    "docx", "xls", "xlsx"],
                              accept_multiple_files=True)
 
+            hide_label = """
+                    <style>
+                                [data-testid='stFileUploaderDropzoneInstructions'] > div > span {
+                    display: none;
+                    }
+                                [data-testid='stFileUploaderDropzoneInstructions'] > div::before {
+                    content: 'Приложите фото';
+                    }
+            
+                     </style>
+                     """
+            st.markdown(hide_label, unsafe_allow_html=True)
+
             if st.button("Отправить заявку"):
                 build_request(problems_dict)
                 if not check_object():
                     st.error("Не выбран объект!")
-                    time.sleep(1)
+                    sleep(1)
                 else:
                     if not check_fields():
                         st.error("Форма не заполнена!")
-                        time.sleep(1)
+                        sleep(1)
                     else:
                         st.info("Проверки выполнены...")
                         st.info(st.session_state.request_body)
                         st.info("Приложенных файлов: " + \
                                 str(len(st.session_state.файлы)))
                         create_tasks(st.session_state.request_body, st.session_state.файлы)
-                        time.sleep(3)
-                st.rerun()
+                        sleep(3)
             st.divider()
         elif st.session_state.request_sent:
             st.success("Ваша заявка отправлена!")
