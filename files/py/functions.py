@@ -189,19 +189,21 @@ def build_request(problems_dict) -> None:
     """Процедура собирает текст заявки из полей формы"""
     st.session_state.request_body = ""
     i = 1
-    for _ in problems_dict["Техподдержка"]:
-        if _ in st.session_state.technical_problems:
-            if i == 1: st.session_state.request_body += "В техподдержку:\n\n"
-            st.session_state.request_body += str(i) + ") " + _ + "\n"
-            i += 1
+    if "technical_problems" in st.session_state:
+        for _ in problems_dict["Техподдержка"]:
+            if _ in st.session_state.technical_problems:
+                if i == 1: st.session_state.request_body += "В техподдержку:\n\n"
+                st.session_state.request_body += str(i) + ") " + _ + "\n"
+                i += 1
     if i != 1:
         st.session_state.request_body += "\n"
     i = 1
-    for _ in problems_dict["Обслуживание"]:
-        if _ in st.session_state.service_problems:
-            if i == 1: st.session_state.request_body += "Обслуживающему персоналу:\n\n"
-            st.session_state.request_body += str(i) + ") " + _ + "\n"
-            i += 1
+    if "service_problems" in st.session_state:
+        for _ in problems_dict["Обслуживание"]:
+            if _ in st.session_state.service_problems:
+                if i == 1: st.session_state.request_body += "Обслуживающему персоналу:\n\n"
+                st.session_state.request_body += str(i) + ") " + _ + "\n"
+                i += 1
     if i != 1:
         st.session_state.request_body += "\n"
     i = 1
@@ -331,9 +333,8 @@ def auto_login():
 def request_info(issues):
     issues_text = ""
     for i in issues:
-        issues_text += f"[{str(i['issue'].key)}]({os.getenv('JIRA_SERVER').rstrip("/")}/browse/{i['issue']}),"
-    st.write(f"Заявка ({issues_text.rstrip(",")}) успешно создана! Уведомления о статусе заявки буду приходить на почту.")
-
+        issues_text += f"[{str(i['issue'].key)}]({os.getenv('JIRA_SERVER').rstrip("/")}/browse/{i['issue']}), "
+    st.write(f"Заявка ({issues_text.rstrip(", ")}) успешно создана! Уведомления о статусе заявки буду приходить на почту.")
     if st.button("ОК"):
         st.rerun()
 
@@ -491,17 +492,28 @@ def request(object: str):
                     if i in service_problems:
                         serv_obj_prob.append(i)
 
-                left, right = st.columns([1, 1])
-                tech_chosen_problems = left.pills("Техническая", key='technical_problems',
+                left, right = None, None
+
+                tech_chosen_problems, serv_chosen_problems = [], []
+
+                if len(tech_obj_prob) != 0 and len(serv_obj_prob) != 0:
+                    left, right = st.columns([1, 1])
+                elif len(tech_obj_prob) == 0 and len(serv_obj_prob) != 0:
+                    right = st
+                elif len(tech_obj_prob) != 0 and len(serv_obj_prob) == 0:
+                    left = st
+
+                if left is not None:
+                    tech_chosen_problems = left.pills("Техническая", key='technical_problems',
                                                   options=tech_obj_prob + ["Другой запрос в ИТ"],
                                                   selection_mode="multi")
-
-                serv_chosen_problems = right.pills("Хозяйственная", key='service_problems',
+                if right is not None:
+                    serv_chosen_problems = right.pills("Хозяйственная", key='service_problems',
                                                    options=serv_obj_prob + ["Другой запрос в АХО"],
                                                    selection_mode="multi")
 
                 if "Другой запрос в ИТ" in tech_chosen_problems or "Другой запрос в АХО" in serv_chosen_problems:
-                    st.text_area("Другое", key="other", placeholder="Другое")
+                    st.text_area("", key="other", placeholder="Другое")
                 if "Другой запрос в ИТ" in tech_chosen_problems:
                     st.session_state.other_it = True
                 else:
