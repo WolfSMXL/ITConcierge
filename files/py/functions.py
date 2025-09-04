@@ -142,13 +142,23 @@ def create_tasks(body: str, files: list) -> None:
         issues_list.append(issue_dict)
 
     if other != -1:
-        issue_dict = {
+        if st.session_state.other_it:
+            issue_dict = {
                 'project': {'id': admin_help},
                 'summary': f"Другая проблема в {st.session_state.object}",
                 'description': filtered_split_text[other + 1].strip(", "),
                 'issuetype': 'Задача'
             }
-        issues_list.append(issue_dict)
+            issues_list.append(issue_dict)
+        if st.session_state.other_serv:
+            issue_dict = {
+                    'project': {'id': business_support},
+                    'summary': f"Другая проблема в {st.session_state.object}",
+                    'description': filtered_split_text[other + 1].strip(", "),
+                    'issuetype': 'Задача'
+                }
+            issues_list.append(issue_dict)
+
 
     try:
         issues = jira.create_issues(issues_list)
@@ -174,7 +184,6 @@ def create_tasks(body: str, files: list) -> None:
                 st.rerun()
         else:
             print(f"Ошибка при создании заявки: {str(e)}")
-
 
 def build_request(problems_dict) -> None:
     """Процедура собирает текст заявки из полей формы"""
@@ -320,12 +329,10 @@ def auto_login():
 
 @st.dialog("Информация", on_dismiss="rerun")
 def request_info(issues):
-    st.write("Задачи успешно созданы по заявке:")
     issues_text = ""
     for i in issues:
-        issues_text += f"{str(i['issue'].key)}: {os.getenv('JIRA_SERVER')}browse/{i['issue']}\n"
-    with st.container():
-        st.write(issues_text)
+        issues_text += f"[{str(i['issue'].key)}]({os.getenv('JIRA_SERVER').rstrip("/")}/browse/{i['issue']}),"
+    st.write(f"Заявка ({issues_text.rstrip(",")}) успешно создана! Уведомления о статусе заявки буду приходить на почту.")
 
     if st.button("ОК"):
         st.rerun()
@@ -486,15 +493,24 @@ def request(object: str):
 
                 left, right = st.columns([1, 1])
                 tech_chosen_problems = left.pills("Техническая", key='technical_problems',
-                                                  options=tech_obj_prob,
+                                                  options=tech_obj_prob + ["Другой запрос в ИТ"],
                                                   selection_mode="multi")
 
                 serv_chosen_problems = right.pills("Хозяйственная", key='service_problems',
-                                                   options=serv_obj_prob + ["Другое"],
+                                                   options=serv_obj_prob + ["Другой запрос в АХО"],
                                                    selection_mode="multi")
 
-                if "Другое" in tech_chosen_problems or "Другое" in serv_chosen_problems:
-                    st.text_area("Другое", key="other")
+                if "Другой запрос в ИТ" in tech_chosen_problems or "Другой запрос в АХО" in serv_chosen_problems:
+                    st.text_area("Другое", key="other", placeholder="Другое")
+                if "Другой запрос в ИТ" in tech_chosen_problems:
+                    st.session_state.other_it = True
+                else:
+                    st.session_state.other_it = False
+                if "Другой запрос в АХО" in serv_chosen_problems:
+                    st.session_state.other_serv = True
+                else:
+                    st.session_state.other_serv = False
+
 
             st.file_uploader("Добавить вложение",
                              key="файлы",
@@ -516,6 +532,7 @@ def request(object: str):
             st.markdown(hide_label, unsafe_allow_html=True)
 
             if st.button("Отправить заявку"):
+
                 build_request(problems_dict)
                 if not check_object():
                     st.error("Не выбран объект!")
