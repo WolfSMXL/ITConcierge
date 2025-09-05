@@ -1,14 +1,17 @@
+import base64
 import csv
 import io
 import os
 import re
+from email.mime.text import MIMEText
 from pathlib import Path
 from urllib.parse import urlencode
 import streamlit as st
-import time
+from time import sleep, time
 from jira import JIRA
 from streamlit_cookies_manager import EncryptedCookieManager
-
+from email.message import EmailMessage
+from exchangelib import DELEGATE, Account, Credentials, Message, Mailbox, HTMLBody
 
 
 def hide_sidebar():
@@ -28,6 +31,30 @@ def hide_sidebar():
     """, unsafe_allow_html=True)
 
 def setup_page_config():
+    hide_decoration_bar_style = '''
+        <style>
+            [data-testid="stDecoration"] {
+                display: none;
+            }
+        </style>
+    '''
+    st.markdown(hide_decoration_bar_style, unsafe_allow_html=True)
+
+    st.markdown(
+        '<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">',
+        unsafe_allow_html=True)
+    img = Path(__file__).parent.parent / "png/DISg_colored.png"
+    img_bytes = img.read_bytes()
+    encoded_img = base64.b64encode(img_bytes).decode()
+    img_html = "data:image/png;base64,{}".format(encoded_img)
+    st.markdown(f"""
+    <nav class="navbar fixed-top navbar-expand-lg navbar-dark">
+      <a href="https://www.dis-group.ru">
+        <img src="{img_html}" width=30 class="navbar-brand" target="_blank"></img>
+      </a>
+    </nav>
+    """, unsafe_allow_html=True)
+
     st.set_page_config(
         page_title="Admin, Help!",
         page_icon="files/ico/DISg_colored.ico",
@@ -117,22 +144,36 @@ def create_tasks(body: str, files: list) -> None:
         issues_list.append(issue_dict)
 
     if other != -1:
-        issue_dict = {
+        if st.session_state.other_it:
+            issue_dict = {
                 'project': {'id': admin_help},
                 'summary': f"Другая проблема в {st.session_state.object}",
                 'description': filtered_split_text[other + 1].strip(", "),
                 'issuetype': 'Задача'
             }
-        issues_list.append(issue_dict)
+            issues_list.append(issue_dict)
+        if st.session_state.other_serv:
+            issue_dict = {
+                    'project': {'id': business_support},
+                    'summary': f"Другая проблема в {st.session_state.object}",
+                    'description': filtered_split_text[other + 1].strip(", "),
+                    'issuetype': 'Задача'
+                }
+            issues_list.append(issue_dict)
+
 
     try:
         issues = jira.create_issues(issues_list)
+        if not st.session_state.anonymous:
+            for i in issues:
+                i["issue"].update(reporter={'name': st.session_state.user.name})
         if len(files) != 0:
             for i in issues:
                 for j in files:
                     bytesio = io.BytesIO(j.getvalue())
                     bytesio.seek(0)
                     jira.add_attachment(issue=i["issue"], attachment=bytesio, filename=j.name)
+        request_info(issues)
     except Exception as e:
         if "CAPTCHA_CHALLENGE" in str(e):
             # Логика обработки капчи
@@ -146,25 +187,39 @@ def create_tasks(body: str, files: list) -> None:
         else:
             print(f"Ошибка при создании заявки: {str(e)}")
 
-    st.rerun()
-
 def build_request(problems_dict) -> None:
     """Процедура собирает текст заявки из полей формы"""
     st.session_state.request_body = ""
     i = 1
-    for _ in problems_dict["Техподдержка"]:
-        if _ in st.session_state.technical_problems:
-            if i == 1: st.session_state.request_body += "В техподдержку:\n\n"
-            st.session_state.request_body += str(i) + ") " + _ + "\n"
-            i += 1
+    if "technical_problems" in st.session_state:
+        for _ in problems_dict["Техподдержка"]:
+            if _ in st.session_state.technical_problems:
+                if i == 1: st.session_state.request_body += "В техподдержку:\n\n"
+                line_end = ""
+                if _ == "Проблемы с оборудованием":
+                    if "equipment" in st.session_state or "other_equipment" in st.session_state:
+                        line_end += " ("
+                        if "equipment" in st.session_state:
+                            for j in st.session_state.equipment:
+                                line_end += j + ", "
+                        if "other_equipment" in st.session_state:
+                            for j in st.session_state.other_equipment:
+                                line_end += j
+                        line_end = line_end.rstrip(", ")
+                        line_end += ")"
+
+                line_end += "\n"
+                st.session_state.request_body += str(i) + ") " + _ + line_end
+                i += 1
     if i != 1:
         st.session_state.request_body += "\n"
     i = 1
-    for _ in problems_dict["Обслуживание"]:
-        if _ in st.session_state.service_problems:
-            if i == 1: st.session_state.request_body += "Обслуживающему персоналу:\n\n"
-            st.session_state.request_body += str(i) + ") " + _ + "\n"
-            i += 1
+    if "service_problems" in st.session_state:
+        for _ in problems_dict["Обслуживание"]:
+            if _ in st.session_state.service_problems:
+                if i == 1: st.session_state.request_body += "Обслуживающему персоналу:\n\n"
+                st.session_state.request_body += str(i) + ") " + _ + "\n"
+                i += 1
     if i != 1:
         st.session_state.request_body += "\n"
     i = 1
@@ -199,11 +254,11 @@ def checks() -> None:
     # Проверка выбора объекта
     if check_object():
         st.info("Проблемный объект: " + st.session_state.object)
-        time.sleep(3)
+        sleep(3)
         st.session_state.request = True
     else:
         st.warning("Необходимо выбрать проблемный объект!")
-        time.sleep(3)
+        sleep(3)
         st.session_state.request = False
     # Проверка заполнения полей заявки
     if (not st.session_state.request_body == "") or \
@@ -213,11 +268,11 @@ def checks() -> None:
         if len(st.session_state.файлы):
             st.info("Добавлено файлов: " + \
                     str(len(st.session_state.файлы)))
-        time.sleep(3)
+        sleep(3)
         st.session_state.request = True
     else:
         st.warning("Необходимо заполнить поля заявки!")
-        time.sleep(3)
+        sleep(3)
         st.session_state.request = False
     return None
 
@@ -225,15 +280,18 @@ def init_session_state():
     # Соединение с Jira
     if 'jira' not in st.session_state:
         try:
-            token_auth = (os.getenv("TECH_LOGIN"), os.getenv("TECH_PASSWORD"))
+            basic_auth = (os.getenv("JIRA_TECH_LOGIN"), os.getenv("JIRA_TECH_PASSWORD"))
             jira = JIRA(
                 options={"server": os.getenv("JIRA_SERVER")},
-                basic_auth=token_auth
+                basic_auth=basic_auth
             )
         except Exception as e:
             print(str(e))
             jira = None
-        st.session_state.jira = jira
+        if jira:
+            st.session_state.jira = jira
+        else:
+            st.error("Не удалось подключиться к JIRA")
     # Статус заявки
     if not 'request' in st.session_state: st.session_state.request = False
     # Счётчик попыток создания заявок в одном сеансе
@@ -250,9 +308,11 @@ def init_session_state():
     if not 'user' in st.session_state: st.session_state.user = st.query_params.get(
         'user', "Аноним")
     # Имя пользователя
-    if not 'user_name' in st.session_state: st.session_state.user_name = "Аноним"
+    if not 'user_name' in st.session_state: st.session_state.user_email = "Аноним"
     # Обработка выхода
     if "other" not in st.session_state: st.session_state.other = None
+    if "cookies" not in st.session_state:
+        init_cookies()
     query_params = st.query_params
     if 'logout' not in query_params.keys():
         query_params['logout'] = "false"
@@ -272,18 +332,42 @@ def init_cookies():
         st.spinner("Ожидание загрузки хлебных крошек", show_time=True)
         st.stop()
 
-    return cookies
+    st.session_state.cookies = cookies
 
-cookies = init_cookies()
+def auto_login():
+    sleep(0.5)
+    cookies = st.session_state.cookies
+    # Пробуем достать логин из куки
+    stored_username = cookies.get('username', '')
+    if stored_username:
+        st.session_state.auth = True
+        st.session_state.user_email = stored_username
+        return True
+    return False
+
+@st.dialog("Информация", on_dismiss="rerun")
+def request_info(issues):
+    issues_text = ""
+    for i in issues:
+        issues_text += f"[{str(i['issue'].key)}]({os.getenv('JIRA_SERVER').rstrip("/")}/browse/{i['issue']}), "
+    st.write(f"Заявка ({issues_text.rstrip(", ")}) успешно создана! Уведомления о статусе заявки буду приходить на почту.")
+    if st.button("OK"):
+        st.rerun()
+
+@st.dialog("Информация")
+def connect_printer_info():
+    st.write("Инструкция по подключению была отправлена на почту")
 
 def request(object: str):
+    cookies = st.session_state.cookies
+    auto_logged_in = auto_login()
     # Если пользователь не аутентифицирован, показываем форму входа
-    if not st.session_state.auth and cookies['authenticated'] == 'false':
+    if not st.session_state.auth and not auto_logged_in:
         st.empty()
         c1, c2, c3 = st.columns([1, 4, 1])
         with c2.form("auth_form"):
             # st.image("files/png/Jira.webp", use_container_width=True)
-            st.session_state.user_name = st.text_input("Имя")
+            st.session_state.user_email = st.text_input("Имя")
             remember_me = st.checkbox("Запомнить", value=True)
             submit_button = st.form_submit_button(
                 "Вход", use_container_width=True)
@@ -292,18 +376,21 @@ def request(object: str):
                 if remember_me:
                     # Устанавливаем cookie с сроком действия 30 дней
                     cookies['authenticated'] = 'true'
-                    cookies['username'] = st.session_state.user_name
+                    cookies['username'] = st.session_state.user_email
                     expires_at = int(time()) + 30 * 24 * 60 * 60  # 30 дней
                     cookies['expires_at'] = str(expires_at)
                     cookies.save()
+                    st.session_state.cookies = cookies
                     # Обновляем страницу, чтобы скрыть форму входа
                 st.rerun()
     else:
         """Форма создания заявки с st.pills и множественным выбором"""
         base_path = Path(__file__).parent
+        objects_file_path = (base_path / "../csv/objects.csv").resolve()
         service_problems_file_path = (base_path / "../csv/problems.csv").resolve()
         technical_problems_file_path = (base_path / "../csv/problems.csv").resolve()
         objects_problems_file_path = (base_path / "../csv/problems_objects.csv").resolve()
+        connections_file_path = (base_path / "../csv/printer_connections.csv").resolve()
         # Кнопка, встроенная через HTML-форму + query-параметр
         st.markdown("""
             <style>
@@ -329,13 +416,18 @@ def request(object: str):
                 </form>
             </div>
             """, unsafe_allow_html=True)
-        if cookies["authenticated"] == 'true':
-            user_login = JIRA.user(st.session_state.jira, cookies["username"])
-        elif st.session_state.user_name:
-            user_login = JIRA.user(st.session_state.jira, st.session_state.user_name)
-        else:
-            st.error("Пользователь не авторизован")
-        st.header(f"Добро пожаловать, {user_login}!")
+        saved_username = cookies.get('username', '')
+        if saved_username:
+            st.session_state.user_email = saved_username
+
+        try:
+            user_login = JIRA.search_users(st.session_state.jira, st.session_state.user_email)[0]
+            st.session_state.user = user_login
+            st.session_state.anonymous = False
+        except Exception as e:
+            user_login = "Аноним"
+            st.session_state.anonymous = True
+        st.header(f"Добро пожаловать, {user_login.displayName}!")
         # Обработка выхода
         if st.session_state.logout:
             # Сброс данных сессии
@@ -344,8 +436,18 @@ def request(object: str):
             cookies['username'] = ''
             cookies['expires_at'] = '0'
             cookies.save()
+            st.session_state.cookies = cookies
             st.query_params["logout"] = "false"
             st.switch_page("qr.py")
+
+        objects = []
+        object_categories = []
+        with objects_file_path.open(encoding="utf-8") as f:
+            objects_csv = csv.reader(f)
+            next(objects_csv)
+            for i in objects_csv:
+                objects.append(i[0])
+                object_categories.append(i[1])
 
         service_problems = []
         with service_problems_file_path.open(encoding="utf-8") as f:
@@ -370,9 +472,30 @@ def request(object: str):
         if (not st.session_state.request_sent) and (not st.session_state.request):
             st.divider()
 
-            st.session_state.object = object
+            if object != "":
+                st.session_state.object = object
+                st.subheader(st.session_state.object, divider=True)
 
-            st.subheader(st.session_state.object, divider=True)
+                with objects_file_path.open(encoding="utf-8") as f:
+                    objects_csv = csv.reader(f)
+                    next(objects_csv)
+                    for i in objects_csv:
+                        if i[0] == object:
+                            object_category = i[1]
+            else:
+                object_category = st.selectbox("Выберите категорию объекта", options=set(object_categories))
+                objects_by_category = []
+
+                with objects_file_path.open(encoding="utf-8") as f:
+                    objects_csv = csv.reader(f)
+                    next(objects_csv)
+                    for i in objects_csv:
+                        if i[1] == object_category:
+                            objects_by_category.append(i[0])
+
+                st.session_state.object = st.selectbox("Выберите объект", options=objects_by_category)
+
+
 
             st.write("Причина обращения")
 
@@ -398,17 +521,111 @@ def request(object: str):
                     if i in service_problems:
                         serv_obj_prob.append(i)
 
-                left, right = st.columns([1, 1])
-                tech_chosen_problems = left.pills("Техническая", key='technical_problems',
-                                                  options=tech_obj_prob,
-                                                  selection_mode="multi")
+                left, right = None, None
 
-                serv_chosen_problems = right.pills("Сервисная", key='service_problems',
-                                                   options=serv_obj_prob + ["Другое"],
+                tech_chosen_problems, serv_chosen_problems = [], []
+
+                if len(tech_obj_prob) != 0 and len(serv_obj_prob) != 0:
+                    left, right = st.columns([1, 1])
+                elif len(tech_obj_prob) == 0 and len(serv_obj_prob) != 0:
+                    right = st
+                elif len(tech_obj_prob) != 0 and len(serv_obj_prob) == 0:
+                    left = st
+
+                if left is not None:
+                    tech_chosen_problems = left.pills("Техническая", key='technical_problems',
+                                                  options=tech_obj_prob + ["Другой запрос в ИТ"],
+                                                  selection_mode="multi")
+                if right is not None:
+                    serv_chosen_problems = right.pills("Хозяйственная", key='service_problems',
+                                                   options=serv_obj_prob + ["Другой запрос в АХО"],
                                                    selection_mode="multi")
 
-                if "Другое" in tech_chosen_problems or "Другое" in serv_chosen_problems:
-                    st.text_area("Другое", key="other")
+                if "Проблемы с оборудованием" in tech_chosen_problems:
+                    if object_category == "Переговорные":
+                        equipment_negotiation_list = ["Спикерфон", "Клавиатура/Мышь", "Телевизор", "Ноутбук/Неттоп"]
+                        st.pills("Оборудование", key="equipment", options=equipment_negotiation_list,
+                                 selection_mode="multi")
+                    if object_category == "Кабинеты":
+                        equipment_negotiation_list = ["Ноутбук", "Клавиатура/Мышь", "Док-станция", "Монитор", "Телевизор"]
+                        st.pills("Оборудование", key="equipment", options=equipment_negotiation_list,
+                                 selection_mode="multi")
+
+                left_text, right_text = None, None
+
+                if "Проблемы с оборудованием" in tech_chosen_problems:
+                    left_text = st
+
+                if "Другой запрос в ИТ" in tech_chosen_problems or "Другой запрос в АХО" in serv_chosen_problems:
+                    if "Проблемы с оборудованием" in tech_chosen_problems:
+                        left_text, right_text = st.columns([1, 1])
+                    else:
+                        right_text = st
+
+
+                if left_text is not None:
+                    left_text.text_area("Другое оборудование", key="other_equipment", placeholder="Другое оборудование", label_visibility="collapsed")
+                if right_text is not None:
+                    right_text.text_area("Другая причина обращения", key="other", placeholder="Другая причина обращения", label_visibility="collapsed")
+
+                if "Другой запрос в ИТ" in tech_chosen_problems:
+                    st.session_state.other_it = True
+                else:
+                    st.session_state.other_it = False
+                if "Другой запрос в АХО" in serv_chosen_problems:
+                    st.session_state.other_serv = True
+                else:
+                    st.session_state.other_serv = False
+
+                if "Подключиться к принтеру" in tech_chosen_problems and not st.session_state.email_sent:
+                    connection_link = ""
+                    with connections_file_path.open(encoding="utf-8") as f:
+                        connections_csv = csv.reader(f)
+                        next(connections_csv)
+                        for i in connections_csv:
+                            if i[0] == st.session_state.object:
+                                connection_link = i[1]
+
+                    credentials = Credentials(
+                        username=os.getenv("OUTLOOK_TECH_LOGIN"),
+                        password=os.getenv("OUTLOOK_TECH_PASSWORD")
+                    )
+                    a = Account(
+                        primary_smtp_address=os.getenv("OUTLOOK_TECH_LOGIN"),
+                        credentials=credentials,
+                        autodiscover=True,
+                        access_type=DELEGATE
+                    )
+
+                    email = EmailMessage()
+                    email["From"] = os.getenv("OUTLOOK_TECH_LOGIN")
+                    email["To"] = st.session_state.user_email
+                    email["Subject"] = "Инструкция по подключению принтера"
+
+                    email_body = f"""<pre>
+Для самостоятельного подключения «{st.session_state.object}» перейти по ссылке <a href="{connection_link}">{connection_link}</a>
+Подробную инструкцию можно посмотреть на <a href="https://mayak.data-integration.ru/kms/lh/item/30701/preview?subType=T_PIVOT_DOCS_ICS">Маяке</a>
+Если что-то пошло не так, приходи к нам в техническую поддержку:
+<a href="https://jira.data-integration.ru/plugins/servlet/desk/portal/1">Портал Admin Help</a>
+</pre>"""
+
+
+
+                    m = Message(
+                        account=a,
+                        subject="Инструкция по подключению принтера",
+                        body=HTMLBody(email_body),
+                        to_recipients=[
+                            Mailbox(email_address=st.session_state.user_email)
+                        ]
+                    )
+                    m.send()
+                    st.session_state.email_sent = True
+                    connect_printer_info()
+                else:
+                    st.session_state.email_sent = False
+
+
 
             st.file_uploader("Добавить вложение",
                              key="файлы",
@@ -416,23 +633,36 @@ def request(object: str):
                                    "docx", "xls", "xlsx"],
                              accept_multiple_files=True)
 
+            hide_label = """
+                    <style>
+                                [data-testid='stFileUploaderDropzoneInstructions'] > div > span {
+                    display: none;
+                    }
+                                [data-testid='stFileUploaderDropzoneInstructions'] > div::before {
+                    content: 'Приложите фото';
+                    }
+            
+                     </style>
+                     """
+            st.markdown(hide_label, unsafe_allow_html=True)
+
             if st.button("Отправить заявку"):
+
                 build_request(problems_dict)
                 if not check_object():
                     st.error("Не выбран объект!")
-                    time.sleep(1)
+                    sleep(1)
                 else:
                     if not check_fields():
                         st.error("Форма не заполнена!")
-                        time.sleep(1)
+                        sleep(1)
                     else:
                         st.info("Проверки выполнены...")
                         st.info(st.session_state.request_body)
                         st.info("Приложенных файлов: " + \
                                 str(len(st.session_state.файлы)))
                         create_tasks(st.session_state.request_body, st.session_state.файлы)
-                        time.sleep(3)
-                st.rerun()
+                        sleep(3)
             st.divider()
         elif st.session_state.request_sent:
             st.success("Ваша заявка отправлена!")
