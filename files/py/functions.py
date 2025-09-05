@@ -3,13 +3,15 @@ import csv
 import io
 import os
 import re
+from email.mime.text import MIMEText
 from pathlib import Path
 from urllib.parse import urlencode
 import streamlit as st
 from time import sleep, time
 from jira import JIRA
 from streamlit_cookies_manager import EncryptedCookieManager
-
+from email.message import EmailMessage
+from exchangelib import DELEGATE, Account, Credentials, Message, Mailbox, HTMLBody
 
 
 def hide_sidebar():
@@ -164,7 +166,7 @@ def create_tasks(body: str, files: list) -> None:
         issues = jira.create_issues(issues_list)
         if not st.session_state.anonymous:
             for i in issues:
-                i["issue"].update(reporter={'name': st.session_state.user_name})
+                i["issue"].update(reporter={'name': st.session_state.user_email})
         if len(files) != 0:
             for i in issues:
                 for j in files:
@@ -264,7 +266,7 @@ def init_session_state():
     # Соединение с Jira
     if 'jira' not in st.session_state:
         try:
-            basic_auth = (os.getenv("TECH_LOGIN"), os.getenv("TECH_PASSWORD"))
+            basic_auth = (os.getenv("JIRA_TECH_LOGIN"), os.getenv("JIRA_TECH_PASSWORD"))
             jira = JIRA(
                 options={"server": os.getenv("JIRA_SERVER")},
                 basic_auth=basic_auth
@@ -292,7 +294,7 @@ def init_session_state():
     if not 'user' in st.session_state: st.session_state.user = st.query_params.get(
         'user', "Аноним")
     # Имя пользователя
-    if not 'user_name' in st.session_state: st.session_state.user_name = "Аноним"
+    if not 'user_name' in st.session_state: st.session_state.user_email = "Аноним"
     # Обработка выхода
     if "other" not in st.session_state: st.session_state.other = None
     if "cookies" not in st.session_state:
@@ -325,7 +327,7 @@ def auto_login():
     stored_username = cookies.get('username', '')
     if stored_username:
         st.session_state.auth = True
-        st.session_state.user_name = stored_username
+        st.session_state.user_email = stored_username
         return True
     return False
 
@@ -335,8 +337,12 @@ def request_info(issues):
     for i in issues:
         issues_text += f"[{str(i['issue'].key)}]({os.getenv('JIRA_SERVER').rstrip("/")}/browse/{i['issue']}), "
     st.write(f"Заявка ({issues_text.rstrip(", ")}) успешно создана! Уведомления о статусе заявки буду приходить на почту.")
-    if st.button("ОК"):
+    if st.button("OK"):
         st.rerun()
+
+@st.dialog("Информация")
+def connect_printer_info():
+    st.write("Инструкция по подключению была отправлена на почту")
 
 def request(object: str):
     cookies = st.session_state.cookies
@@ -347,7 +353,7 @@ def request(object: str):
         c1, c2, c3 = st.columns([1, 4, 1])
         with c2.form("auth_form"):
             # st.image("files/png/Jira.webp", use_container_width=True)
-            st.session_state.user_name = st.text_input("Имя")
+            st.session_state.user_email = st.text_input("Имя")
             remember_me = st.checkbox("Запомнить", value=True)
             submit_button = st.form_submit_button(
                 "Вход", use_container_width=True)
@@ -356,7 +362,7 @@ def request(object: str):
                 if remember_me:
                     # Устанавливаем cookie с сроком действия 30 дней
                     cookies['authenticated'] = 'true'
-                    cookies['username'] = st.session_state.user_name
+                    cookies['username'] = st.session_state.user_email
                     expires_at = int(time()) + 30 * 24 * 60 * 60  # 30 дней
                     cookies['expires_at'] = str(expires_at)
                     cookies.save()
@@ -370,6 +376,7 @@ def request(object: str):
         service_problems_file_path = (base_path / "../csv/problems.csv").resolve()
         technical_problems_file_path = (base_path / "../csv/problems.csv").resolve()
         objects_problems_file_path = (base_path / "../csv/problems_objects.csv").resolve()
+        connections_file_path = (base_path / "../csv/printer_connections.csv").resolve()
         # Кнопка, встроенная через HTML-форму + query-параметр
         st.markdown("""
             <style>
@@ -397,10 +404,10 @@ def request(object: str):
             """, unsafe_allow_html=True)
         saved_username = cookies.get('username', '')
         if saved_username:
-            st.session_state.user_name = saved_username
+            st.session_state.user_email = saved_username
 
         try:
-            user_login = JIRA.user(st.session_state.jira, st.session_state.user_name).displayName
+            user_login = JIRA.search_users(st.session_state.jira, st.session_state.user_email)[0].displayName
             st.session_state.anonymous = False
         except Exception as e:
             user_login = "Аноним"
@@ -453,6 +460,13 @@ def request(object: str):
             if object != "":
                 st.session_state.object = object
                 st.subheader(st.session_state.object, divider=True)
+
+                with objects_file_path.open(encoding="utf-8") as f:
+                    objects_csv = csv.reader(f)
+                    next(objects_csv)
+                    for i in objects_csv:
+                        if i[0] == object:
+                            object_category = i[1]
             else:
                 object_category = st.selectbox("Выберите категорию объекта", options=set(object_categories))
                 objects_by_category = []
@@ -514,6 +528,7 @@ def request(object: str):
 
                 if "Другой запрос в ИТ" in tech_chosen_problems or "Другой запрос в АХО" in serv_chosen_problems:
                     st.text_area("", key="other", placeholder="Другое")
+
                 if "Другой запрос в ИТ" in tech_chosen_problems:
                     st.session_state.other_it = True
                 else:
@@ -522,6 +537,55 @@ def request(object: str):
                     st.session_state.other_serv = True
                 else:
                     st.session_state.other_serv = False
+
+                if "Подключиться к принтеру" in tech_chosen_problems and not st.session_state.email_sent:
+                    connection_link = ""
+                    with connections_file_path.open(encoding="utf-8") as f:
+                        connections_csv = csv.reader(f)
+                        next(connections_csv)
+                        for i in connections_csv:
+                            if i[0] == st.session_state.object:
+                                connection_link = i[1]
+
+                    credentials = Credentials(
+                        username=os.getenv("OUTLOOK_TECH_LOGIN"),
+                        password=os.getenv("OUTLOOK_TECH_PASSWORD")
+                    )
+                    a = Account(
+                        primary_smtp_address=os.getenv("OUTLOOK_TECH_LOGIN"),
+                        credentials=credentials,
+                        autodiscover=True,
+                        access_type=DELEGATE
+                    )
+
+                    email = EmailMessage()
+                    email["From"] = os.getenv("OUTLOOK_TECH_LOGIN")
+                    email["To"] = st.session_state.user_email
+                    email["Subject"] = "Инструкция по подключению принтера"
+
+                    email_body = f"""<pre>
+Для самостоятельного подключения «{st.session_state.object}» перейти по ссылке <a href="{connection_link}">{connection_link}</a>
+Подробную инструкцию можно посмотреть на <a href="https://mayak.data-integration.ru/kms/lh/item/30701/preview?subType=T_PIVOT_DOCS_ICS">Маяке</a>
+Если что-то пошло не так, приходи к нам в техническую поддержку:
+<a href="https://jira.data-integration.ru/plugins/servlet/desk/portal/1">Портал Admin Help</a>
+</pre>"""
+
+
+
+                    m = Message(
+                        account=a,
+                        subject="Инструкция по подключению принтера",
+                        body=HTMLBody(email_body),
+                        to_recipients=[
+                            Mailbox(email_address=st.session_state.user_email)
+                        ]
+                    )
+                    m.send()
+                    st.session_state.email_sent = True
+                    connect_printer_info()
+                else:
+                    st.session_state.email_sent = False
+
 
 
             st.file_uploader("Добавить вложение",
