@@ -166,7 +166,7 @@ def create_tasks(body: str, files: list) -> None:
         issues = jira.create_issues(issues_list)
         if not st.session_state.anonymous:
             for i in issues:
-                i["issue"].update(reporter={'name': st.session_state.user_email})
+                i["issue"].update(reporter={'name': st.session_state.user.name})
         if len(files) != 0:
             for i in issues:
                 for j in files:
@@ -195,7 +195,21 @@ def build_request(problems_dict) -> None:
         for _ in problems_dict["Техподдержка"]:
             if _ in st.session_state.technical_problems:
                 if i == 1: st.session_state.request_body += "В техподдержку:\n\n"
-                st.session_state.request_body += str(i) + ") " + _ + "\n"
+                line_end = ""
+                if _ == "Проблемы с оборудованием":
+                    if "equipment" in st.session_state or "other_equipment" in st.session_state:
+                        line_end += " ("
+                        if "equipment" in st.session_state:
+                            for j in st.session_state.equipment:
+                                line_end += j + ", "
+                        if "other_equipment" in st.session_state:
+                            for j in st.session_state.other_equipment:
+                                line_end += j
+                        line_end = line_end.rstrip(", ")
+                        line_end += ")"
+
+                line_end += "\n"
+                st.session_state.request_body += str(i) + ") " + _ + line_end
                 i += 1
     if i != 1:
         st.session_state.request_body += "\n"
@@ -407,12 +421,13 @@ def request(object: str):
             st.session_state.user_email = saved_username
 
         try:
-            user_login = JIRA.search_users(st.session_state.jira, st.session_state.user_email)[0].displayName
+            user_login = JIRA.search_users(st.session_state.jira, st.session_state.user_email)[0]
+            st.session_state.user = user_login
             st.session_state.anonymous = False
         except Exception as e:
             user_login = "Аноним"
             st.session_state.anonymous = True
-        st.header(f"Добро пожаловать, {user_login}!")
+        st.header(f"Добро пожаловать, {user_login.displayName}!")
         # Обработка выхода
         if st.session_state.logout:
             # Сброс данных сессии
@@ -526,8 +541,32 @@ def request(object: str):
                                                    options=serv_obj_prob + ["Другой запрос в АХО"],
                                                    selection_mode="multi")
 
+                if "Проблемы с оборудованием" in tech_chosen_problems:
+                    if object_category == "Переговорные":
+                        equipment_negotiation_list = ["Спикерфон", "Клавиатура/Мышь", "Телевизор", "Ноутбук/Неттоп"]
+                        st.pills("Оборудование", key="equipment", options=equipment_negotiation_list,
+                                 selection_mode="multi")
+                    if object_category == "Кабинеты":
+                        equipment_negotiation_list = ["Ноутбук", "Клавиатура/Мышь", "Док-станция", "Монитор", "Телевизор"]
+                        st.pills("Оборудование", key="equipment", options=equipment_negotiation_list,
+                                 selection_mode="multi")
+
+                left_text, right_text = None, None
+
+                if "Проблемы с оборудованием" in tech_chosen_problems:
+                    left_text = st
+
                 if "Другой запрос в ИТ" in tech_chosen_problems or "Другой запрос в АХО" in serv_chosen_problems:
-                    st.text_area("", key="other", placeholder="Другое")
+                    if "Проблемы с оборудованием" in tech_chosen_problems:
+                        left_text, right_text = st.columns([1, 1])
+                    else:
+                        right_text = st
+
+
+                if left_text is not None:
+                    left_text.text_area("Другое оборудование", key="other_equipment", placeholder="Другое оборудование", label_visibility="collapsed")
+                if right_text is not None:
+                    right_text.text_area("Другая причина обращения", key="other", placeholder="Другая причина обращения", label_visibility="collapsed")
 
                 if "Другой запрос в ИТ" in tech_chosen_problems:
                     st.session_state.other_it = True
