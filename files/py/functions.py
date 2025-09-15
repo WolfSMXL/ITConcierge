@@ -86,6 +86,50 @@ def Вход(auth_manager):
             else:
                 st.error("Неверные учетные данные")
 
+def send_email():
+    base_path = Path(__file__).parent
+    connections_file_path = (base_path / "../csv/printer_connections.csv").resolve()
+    connection_link = ""
+    with connections_file_path.open(encoding="utf-8") as f:
+        connections_csv = csv.reader(f)
+        next(connections_csv)
+        for i in connections_csv:
+            if i[0] == st.session_state.object:
+                connection_link = i[1]
+
+    credentials = Credentials(
+        username=os.getenv("OUTLOOK_TECH_LOGIN"),
+        password=os.getenv("OUTLOOK_TECH_PASSWORD")
+    )
+    a = Account(
+        primary_smtp_address=os.getenv("OUTLOOK_TECH_LOGIN"),
+        credentials=credentials,
+        autodiscover=True,
+        access_type=DELEGATE
+    )
+
+    email = EmailMessage()
+    email["From"] = os.getenv("OUTLOOK_TECH_LOGIN")
+    email["To"] = st.session_state.user_email
+    email["Subject"] = "Инструкция по подключению принтера"
+
+    email_body = f"""<pre>
+    Для самостоятельного подключения «{st.session_state.object}» перейти по ссылке <a href="{connection_link}">{connection_link}</a>
+    Подробную инструкцию можно посмотреть на <a href="https://mayak.data-integration.ru/kms/lh/item/30701/preview?subType=T_PIVOT_DOCS_ICS">Маяке</a>
+    Если что-то пошло не так, приходи к нам в техническую поддержку:
+    <a href="https://jira.data-integration.ru/plugins/servlet/desk/portal/1">Портал Admin Help</a>
+    </pre>"""
+
+    m = Message(
+        account=a,
+        subject="Инструкция по подключению принтера",
+        body=HTMLBody(email_body),
+        to_recipients=[
+            Mailbox(email_address=st.session_state.user_email)
+        ]
+    )
+    m.send()
+
 def exit(auth_manager):
         if st.session_state.auth['authenticated']:
             _, col = st.columns([8, 1])
@@ -173,6 +217,9 @@ def create_tasks(body: str, files: list) -> None:
                     bytesio = io.BytesIO(j.getvalue())
                     bytesio.seek(0)
                     jira.add_attachment(issue=i["issue"], attachment=bytesio, filename=j.name)
+
+        if not st.session_state.anonymous and st.session_state.printer_connect:
+            send_email()
         request_info(issues)
     except Exception as e:
         if "CAPTCHA_CHALLENGE" in str(e):
@@ -351,12 +398,10 @@ def request_info(issues):
     for i in issues:
         issues_text += f"[{str(i['issue'].key)}]({os.getenv('JIRA_SERVER').rstrip(r"/")}/browse/{i['issue']}), "
     st.write(f"Заявка ({issues_text.rstrip(", ")}) успешно создана! Уведомления о статусе заявки буду приходить на почту.")
+    if st.session_state.printer_connect and not st.session_state.anonymous:
+        st.write("Инструкция по подключению принтера была отправлена на почту")
     if st.button("OK"):
         st.rerun()
-
-@st.dialog("Информация")
-def connect_printer_info():
-    st.write("Инструкция по подключению была отправлена на почту")
 
 def request(object: str):
     cookies = st.session_state.cookies
@@ -390,7 +435,7 @@ def request(object: str):
         service_problems_file_path = (base_path / "../csv/problems.csv").resolve()
         technical_problems_file_path = (base_path / "../csv/problems.csv").resolve()
         objects_problems_file_path = (base_path / "../csv/problems_objects.csv").resolve()
-        connections_file_path = (base_path / "../csv/printer_connections.csv").resolve()
+
         # Кнопка, встроенная через HTML-форму + query-параметр
         st.markdown("""
             <style>
@@ -421,7 +466,7 @@ def request(object: str):
             st.session_state.user_email = saved_username
 
         try:
-            if (st.session_state.user_email.contains("@dis-group.ru")):
+            if "@dis-group.ru" in st.session_state.user_email:
                 user_login = JIRA.search_users(st.session_state.jira, st.session_state.user_email)[0]
                 display_name = user_login.displayName
                 st.session_state.user = user_login
@@ -581,53 +626,11 @@ def request(object: str):
                 else:
                     st.session_state.other_serv = False
 
-                if "Подключиться к принтеру" in tech_chosen_problems and not st.session_state.email_sent:
-                    connection_link = ""
-                    with connections_file_path.open(encoding="utf-8") as f:
-                        connections_csv = csv.reader(f)
-                        next(connections_csv)
-                        for i in connections_csv:
-                            if i[0] == st.session_state.object:
-                                connection_link = i[1]
-
-                    credentials = Credentials(
-                        username=os.getenv("OUTLOOK_TECH_LOGIN"),
-                        password=os.getenv("OUTLOOK_TECH_PASSWORD")
-                    )
-                    a = Account(
-                        primary_smtp_address=os.getenv("OUTLOOK_TECH_LOGIN"),
-                        credentials=credentials,
-                        autodiscover=True,
-                        access_type=DELEGATE
-                    )
-
-                    email = EmailMessage()
-                    email["From"] = os.getenv("OUTLOOK_TECH_LOGIN")
-                    email["To"] = st.session_state.user_email
-                    email["Subject"] = "Инструкция по подключению принтера"
-
-                    email_body = f"""<pre>
-Для самостоятельного подключения «{st.session_state.object}» перейти по ссылке <a href="{connection_link}">{connection_link}</a>
-Подробную инструкцию можно посмотреть на <a href="https://mayak.data-integration.ru/kms/lh/item/30701/preview?subType=T_PIVOT_DOCS_ICS">Маяке</a>
-Если что-то пошло не так, приходи к нам в техническую поддержку:
-<a href="https://jira.data-integration.ru/plugins/servlet/desk/portal/1">Портал Admin Help</a>
-</pre>"""
-
-
-
-                    m = Message(
-                        account=a,
-                        subject="Инструкция по подключению принтера",
-                        body=HTMLBody(email_body),
-                        to_recipients=[
-                            Mailbox(email_address=st.session_state.user_email)
-                        ]
-                    )
-                    m.send()
-                    st.session_state.email_sent = True
-                    connect_printer_info()
+                if "Подключиться к принтеру" in tech_chosen_problems:
+                    st.session_state.printer_connect = True
                 else:
-                    st.session_state.email_sent = False
+                    st.session_state.printer_connect = False
+
 
 
 
