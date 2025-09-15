@@ -349,7 +349,7 @@ def auto_login():
 def request_info(issues):
     issues_text = ""
     for i in issues:
-        issues_text += f"[{str(i['issue'].key)}]({os.getenv('JIRA_SERVER').rstrip("/")}/browse/{i['issue']}), "
+        issues_text += f"[{str(i['issue'].key)}]({os.getenv('JIRA_SERVER').rstrip(r"/")}/browse/{i['issue']}), "
     st.write(f"Заявка ({issues_text.rstrip(", ")}) успешно создана! Уведомления о статусе заявки буду приходить на почту.")
     if st.button("OK"):
         st.rerun()
@@ -367,7 +367,7 @@ def request(object: str):
         c1, c2, c3 = st.columns([1, 4, 1])
         with c2.form("auth_form"):
             # st.image("files/png/Jira.webp", use_container_width=True)
-            st.session_state.user_email = st.text_input("Имя")
+            st.session_state.user_email = st.text_input("Почта")
             remember_me = st.checkbox("Запомнить", value=True)
             submit_button = st.form_submit_button(
                 "Вход", use_container_width=True)
@@ -421,13 +421,17 @@ def request(object: str):
             st.session_state.user_email = saved_username
 
         try:
-            user_login = JIRA.search_users(st.session_state.jira, st.session_state.user_email)[0]
-            st.session_state.user = user_login
-            st.session_state.anonymous = False
+            if (st.session_state.user_email.contains("@dis-group.ru")):
+                user_login = JIRA.search_users(st.session_state.jira, st.session_state.user_email)[0]
+                display_name = user_login.displayName
+                st.session_state.user = user_login
+                st.session_state.anonymous = False
+            else:
+                raise Exception("Указан неправильный email")
         except Exception as e:
-            user_login = "Аноним"
+            display_name = "Аноним"
             st.session_state.anonymous = True
-        st.header(f"Добро пожаловать, {user_login.displayName}!")
+        st.header(f"Добро пожаловать, {display_name}!")
         # Обработка выхода
         if st.session_state.logout:
             # Сброс данных сессии
