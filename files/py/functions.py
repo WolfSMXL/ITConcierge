@@ -115,7 +115,7 @@ def send_email():
 
     email_body = f"""<pre>
     Для самостоятельного подключения «{st.session_state.object}» перейти по ссылке <a href="{connection_link}">{connection_link}</a>
-    Подробную инструкцию можно посмотреть на <a href="https://mayak.data-integration.ru/kms/lh/item/30701/preview?subType=T_PIVOT_DOCS_ICS">Маяке</a>
+    Подробную инструкцию можно посмотреть на <a href="https://mayak.data-integration.ru/kms/CM/INTERNAL/LAYOUT?item_id=20430&homePage=%2FCM%2FT_PIVOT_DOCS_ICS%2FVIEW%3Fitem_id%3D30701&homePageEncoded=true">Маяке</a>
     Если что-то пошло не так, приходи к нам в техническую поддержку:
     <a href="https://jira.data-integration.ru/plugins/servlet/desk/portal/1">Портал Admin Help</a>
     </pre>"""
