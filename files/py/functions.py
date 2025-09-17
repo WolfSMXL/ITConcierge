@@ -466,7 +466,14 @@ def request(object: str):
             st.session_state.user_email = saved_username
 
         try:
-            if "@dis-group.ru" in st.session_state.user_email:
+            is_email = False
+            split_email_one = st.session_state.user_email.split("@")
+            if len(split_email_one) == 2:
+                split_email_two = split_email_one[1].split(".")
+                if len(split_email_two) == 2:
+                    is_email = True
+
+            if is_email:
                 user_login = JIRA.search_users(st.session_state.jira, st.session_state.user_email)[0]
                 display_name = user_login.displayName
                 st.session_state.user = user_login
