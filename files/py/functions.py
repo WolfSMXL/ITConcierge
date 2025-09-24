@@ -409,10 +409,12 @@ def request(object: str):
     # Если пользователь не аутентифицирован, показываем форму входа
     if not st.session_state.auth and not auto_logged_in:
         st.empty()
+        st.markdown("<h3 style='text-align: center;'>Добро пожаловать в Консьерж сервис!</h3>", unsafe_allow_html=True)
         c1, c2, c3 = st.columns([1, 4, 1])
         with c2.form("auth_form"):
             # st.image("files/png/Jira.webp", use_container_width=True)
-            st.session_state.user_email = st.text_input("Почта")
+            st.write("Для авторизации введите вашу электронную почту:")
+            st.session_state.user_email = st.text_input("Почта", label_visibility="collapsed")
             remember_me = st.checkbox("Запомнить", value=True)
             submit_button = st.form_submit_button(
                 "Вход", use_container_width=True)
