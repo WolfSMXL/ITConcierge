@@ -3,15 +3,16 @@ import csv
 import io
 import os
 import re
-from email.mime.text import MIMEText
+from email.message import EmailMessage
 from pathlib import Path
-from urllib.parse import urlencode
-import streamlit as st
 from time import sleep, time
+from urllib.parse import urlencode
+from random import randint
+
+import streamlit as st
+from exchangelib import DELEGATE, Account, Credentials, Message, Mailbox, HTMLBody
 from jira import JIRA
 from streamlit_cookies_manager import EncryptedCookieManager
-from email.message import EmailMessage
-from exchangelib import DELEGATE, Account, Credentials, Message, Mailbox, HTMLBody
 
 
 def hide_sidebar():
@@ -123,6 +124,37 @@ def send_email():
     m = Message(
         account=a,
         subject="Инструкция по подключению принтера",
+        body=HTMLBody(email_body),
+        to_recipients=[
+            Mailbox(email_address=st.session_state.user_email)
+        ]
+    )
+    m.send()
+
+def send_code_email():
+    credentials = Credentials(
+        username=os.getenv("OUTLOOK_TECH_LOGIN"),
+        password=os.getenv("OUTLOOK_TECH_PASSWORD")
+    )
+    a = Account(
+        primary_smtp_address=os.getenv("OUTLOOK_TECH_LOGIN"),
+        credentials=credentials,
+        autodiscover=True,
+        access_type=DELEGATE
+    )
+
+    email = EmailMessage()
+    email["From"] = os.getenv("OUTLOOK_TECH_LOGIN")
+    email["To"] = st.session_state.user_email
+    email["Subject"] = "Код подтверждения для входа в Консьерж"
+
+    email_body = f"""<pre>
+        Код подтверждения: {st.session_state.code}
+        </pre>"""
+
+    m = Message(
+        account=a,
+        subject="Код подтверждения для входа в Консьерж",
         body=HTMLBody(email_body),
         to_recipients=[
             Mailbox(email_address=st.session_state.user_email)
@@ -367,6 +399,8 @@ def init_session_state():
         st.session_state.logout = True
     else:
         st.session_state.logout = False
+    if "code" not in st.session_state:
+        st.session_state.code = 0
 
 def init_cookies():
     # Создание экземпляра менеджера куков
@@ -403,31 +437,47 @@ def request_info(issues):
     if st.button("OK"):
         st.rerun()
 
+@st.dialog("Код подтверждения")
+def confirmation():
+    cookies = st.session_state.cookies
+    st.write("Код подтверждения был отправлен на вашу почту.")
+    code = st.text_input("Введите код подтверждения из письма:")
+    if st.button("OK"):
+        if str(st.session_state.code) == code:
+            st.session_state.auth = True
+            if st.session_state.remember_me:
+                # Устанавливаем cookie с сроком действия 30 дней
+                cookies['authenticated'] = 'true'
+                cookies['username'] = st.session_state.user_email
+                expires_at = int(time()) + 30 * 24 * 60 * 60  # 30 дней
+                cookies['expires_at'] = str(expires_at)
+                cookies.save()
+                st.session_state.cookies = cookies
+                # Обновляем страницу, чтобы скрыть форму входа
+            st.rerun()
+        else:
+            st.error("Неверный код")
+
 def request(object: str):
     cookies = st.session_state.cookies
     auto_logged_in = auto_login()
     # Если пользователь не аутентифицирован, показываем форму входа
     if not st.session_state.auth and not auto_logged_in:
         st.empty()
+        st.markdown("<h3 style='text-align: center;'>Добро пожаловать в Консьерж сервис!</h3>", unsafe_allow_html=True)
         c1, c2, c3 = st.columns([1, 4, 1])
         with c2.form("auth_form"):
             # st.image("files/png/Jira.webp", use_container_width=True)
-            st.session_state.user_email = st.text_input("Почта")
-            remember_me = st.checkbox("Запомнить", value=True)
+            st.write("Для авторизации введите вашу электронную почту:")
+            st.session_state.user_email = st.text_input("Почта", label_visibility="collapsed")
+            st.session_state.remember_me = st.checkbox("Запомнить", value=True)
             submit_button = st.form_submit_button(
                 "Вход", use_container_width=True)
             if submit_button:
-                st.session_state.auth = True
-                if remember_me:
-                    # Устанавливаем cookie с сроком действия 30 дней
-                    cookies['authenticated'] = 'true'
-                    cookies['username'] = st.session_state.user_email
-                    expires_at = int(time()) + 30 * 24 * 60 * 60  # 30 дней
-                    cookies['expires_at'] = str(expires_at)
-                    cookies.save()
-                    st.session_state.cookies = cookies
-                    # Обновляем страницу, чтобы скрыть форму входа
-                st.rerun()
+                st.session_state.code = randint(10000,99999)
+                send_code_email()
+                confirmation()
+
     else:
         """Форма создания заявки с st.pills и множественным выбором"""
         base_path = Path(__file__).parent
