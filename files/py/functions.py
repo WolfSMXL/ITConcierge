@@ -318,7 +318,7 @@ def check_object() -> bool:
 def check_fields() -> bool:
     """Процедура проверяет заполнение полей заявки и возвращает `True`,
     если поля заполнялись. В ином случае возвращает `False`"""
-    if st.session_state.request_body or len(st.session_state.файлы):
+    if st.session_state.request_body or len(st.session_state[f"файлы_{st.session_state.uploader_key}"]):
         return True
     else:
         return False
@@ -341,12 +341,12 @@ def checks() -> None:
         st.session_state.request = False
     # Проверка заполнения полей заявки
     if (not st.session_state.request_body == "") or \
-            (not len(st.session_state.файлы)):
+            (not len(st.session_state[f"файлы_{st.session_state.uploader_key}"])):
         if st.session_state.request_body:
             st.info("Текст заявки: \n" + st.session_state.request_body)
-        if len(st.session_state.файлы):
+        if len(st.session_state[f"файлы_{st.session_state.uploader_key}"]):
             st.info("Добавлено файлов: " + \
-                    str(len(st.session_state.файлы)))
+                    str(len(st.session_state[f"файлы_{st.session_state.uploader_key}"])))
         sleep(3)
         st.session_state.request = True
     else:
@@ -401,6 +401,20 @@ def init_session_state():
         st.session_state.logout = False
     if "code" not in st.session_state:
         st.session_state.code = 0
+    if "uploader_key" not in st.session_state:
+        st.session_state.uploader_key = 0
+
+def clear_selected():
+    if "technical_problems" in st.session_state:
+        st.session_state.technical_problems = []
+    if "service_problems" in st.session_state:
+        st.session_state.service_problems = []
+    if st.session_state.other_it or st.session_state.other_serv:
+        st.session_state.other = ""
+    if "other_equipment" in st.session_state:
+        st.session_state.other_equipment = ""
+    if len(st.session_state[f"файлы_{st.session_state.uploader_key}"]) > 0:
+        st.session_state.uploader_key += 1
 
 def init_cookies():
     # Создание экземпляра менеджера куков
@@ -431,10 +445,11 @@ def request_info(issues):
     issues_text = ""
     for i in issues:
         issues_text += f"[{str(i['issue'].key)}]({os.getenv('JIRA_SERVER').rstrip(r"/")}/browse/{i['issue']}), "
-    st.write(f"Заявка ({issues_text.rstrip(", ")}) успешно создана! Уведомления о статусе заявки буду приходить на почту.")
+    st.write(f"Заявка ({issues_text.rstrip(", ")}) успешно создана! Уведомления о статусе заявки буду приходить на  вашу почту.")
     if st.session_state.printer_connect and not st.session_state.anonymous:
-        st.write("Инструкция по подключению принтера была отправлена на почту")
+        st.write("Инструкция по подключению принтера была отправлена на вашу почту")
     if st.button("OK"):
+        clear_selected()
         st.rerun()
 
 @st.dialog("Код подтверждения")
@@ -692,7 +707,7 @@ def request(object: str):
 
 
             st.file_uploader("Добавить вложение",
-                             key="файлы",
+                             key=f"файлы_{st.session_state.uploader_key}",
                              type=["jpg", "jpeg", "png", "pdf", "doc",
                                    "docx", "xls", "xlsx"],
                              accept_multiple_files=True)
@@ -721,12 +736,13 @@ def request(object: str):
                         st.error("Форма не заполнена!")
                         sleep(1)
                     else:
-                        st.info("Проверки выполнены...")
-                        st.info(st.session_state.request_body)
-                        st.info("Приложенных файлов: " + \
-                                str(len(st.session_state.файлы)))
-                        create_tasks(st.session_state.request_body, st.session_state.файлы)
-                        sleep(3)
+                        #st.info("Проверки выполнены...")
+                        #st.info(st.session_state.request_body)
+                        #st.info("Приложенных файлов: " + \
+                        #        str(len(st.session_state[f"файлы_{st.session_state.uploader_key}"])))
+                        create_tasks(st.session_state.request_body, st.session_state[f"файлы_{st.session_state.uploader_key}"])
+                        sleep(1)
+                        #st.rerun()
             st.divider()
         elif st.session_state.request_sent:
             st.success("Ваша заявка отправлена!")
