@@ -50,7 +50,7 @@ def setup_page_config():
     img_html = "data:image/png;base64,{}".format(encoded_img)
     st.markdown(f"""
     <nav class="navbar fixed-top navbar-expand-lg navbar-dark">
-      <a href="https://www.dis-group.ru">
+      <a href="https://jira.data-integration.ru/plugins/servlet/desk">
         <img src="{img_html}" width=30 class="navbar-brand" target="_blank"></img>
       </a>
     </nav>
@@ -146,7 +146,7 @@ def send_code_email():
     email = EmailMessage()
     email["From"] = os.getenv("OUTLOOK_TECH_LOGIN")
     email["To"] = st.session_state.user_email
-    email["Subject"] = "Код подтверждения для входа в Консьерж"
+    email["Subject"] = "Код подтверждения для входа в DIS Help"
 
     email_body = f"""<pre>
         Код подтверждения: {st.session_state.code}
@@ -154,7 +154,7 @@ def send_code_email():
 
     m = Message(
         account=a,
-        subject="Код подтверждения для входа в Консьерж",
+        subject="Код подтверждения для входа в DIS Help",
         body=HTMLBody(email_body),
         to_recipients=[
             Mailbox(email_address=st.session_state.user_email)
@@ -464,7 +464,7 @@ def confirmation():
                 # Устанавливаем cookie с сроком действия 30 дней
                 cookies['authenticated'] = 'true'
                 cookies['username'] = st.session_state.user_email
-                expires_at = int(time()) + 30 * 24 * 60 * 60  # 30 дней
+                expires_at = int(time()) + 365 * 24 * 60 * 60  # 365 дней
                 cookies['expires_at'] = str(expires_at)
                 cookies.save()
                 st.session_state.cookies = cookies
@@ -479,7 +479,7 @@ def request(object: str):
     # Если пользователь не аутентифицирован, показываем форму входа
     if not st.session_state.auth and not auto_logged_in:
         st.empty()
-        st.markdown("<h3 style='text-align: center;'>Добро пожаловать в Консьерж сервис!</h3>", unsafe_allow_html=True)
+        st.markdown("<h3 style='text-align: center;'>Добро пожаловать в DIS Help!</h3>", unsafe_allow_html=True)
         c1, c2, c3 = st.columns([1, 4, 1])
         with c2.form("auth_form"):
             # st.image("files/png/Jira.webp", use_container_width=True)
@@ -615,8 +615,6 @@ def request(object: str):
                             objects_by_category.append(i[0])
 
                 st.session_state.object = st.selectbox("Выберите объект", options=objects_by_category)
-
-
 
             st.write("Причина обращения")
 
