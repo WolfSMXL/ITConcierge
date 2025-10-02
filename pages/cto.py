@@ -17,7 +17,7 @@ def main():
       # Форма заявки
         try:
             request(
-                object="Кабинет Гиацинтова"
+                object="Кабинет Олега Гиацинтова"
             )
         except Exception as e:
             st.error(f"Ошибка при создании заявки: {str(e)}")

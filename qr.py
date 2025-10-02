@@ -1,15 +1,8 @@
 import base64
-import csv
-import io
-import os
-import re
 from pathlib import Path
-from time import sleep, time
-from urllib.parse import urlencode
 
 import streamlit as st
 from dotenv import load_dotenv
-from jira.client import JIRA
 
 from files.py.functions import init_session_state, request
 
@@ -21,6 +14,18 @@ service_problems_file_path = (base_path / "../files/csv/problems.csv").resolve()
 technical_problems_file_path = (base_path / "../files/csv/problems.csv").resolve()
 objects_problems_file_path = (base_path / "../files/csv/problems_objects.csv").resolve()
 
+st.markdown('<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">', unsafe_allow_html=True)
+img_bytes = Path("files/png/DISg_colored.png").read_bytes()
+encoded_img = base64.b64encode(img_bytes).decode()
+img_html = "data:image/png;base64,{}".format(encoded_img)
+st.markdown(f"""
+<nav class="navbar fixed-top navbar-dark" id="navbar">
+  <a href="https://jira.data-integration.ru/plugins/servlet/desk">
+    <img src="{img_html}" width=30 class="navbar-brand" target="_blank"></img>
+  </a>
+</nav>
+""", unsafe_allow_html=True)
+
 hide_decoration_bar_style = '''
     <style>
         [data-testid="stDecoration"] {
@@ -30,17 +35,7 @@ hide_decoration_bar_style = '''
 '''
 st.markdown(hide_decoration_bar_style, unsafe_allow_html=True)
 
-st.markdown('<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">', unsafe_allow_html=True)
-img_bytes = Path("files/png/DISg_colored.png").read_bytes()
-encoded_img = base64.b64encode(img_bytes).decode()
-img_html = "data:image/png;base64,{}".format(encoded_img)
-st.markdown(f"""
-<nav class="navbar fixed-top navbar-expand-lg navbar-dark">
-  <a href="https://www.dis-group.ru">
-    <img src="{img_html}" width=30 class="navbar-brand" target="_blank"></img>
-  </a>
-</nav>
-""", unsafe_allow_html=True)
+
 
 # Настроить название страницы и логотип в заголовке обозревателя
 st.set_page_config(
