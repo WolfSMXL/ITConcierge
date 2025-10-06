@@ -1,8 +1,11 @@
 import base64
 import csv
+import hashlib
+import hmac
 import io
 import os
 import re
+import datetime as dt
 from email.message import EmailMessage
 from pathlib import Path
 from time import sleep, time
@@ -12,6 +15,7 @@ from random import randint
 import streamlit as st
 from exchangelib import DELEGATE, Account, Credentials, Message, Mailbox, HTMLBody
 from jira import JIRA
+from streamlit_cookies_controller import CookieController
 from streamlit_cookies_manager import EncryptedCookieManager
 
 
@@ -57,7 +61,7 @@ def setup_page_config():
     """, unsafe_allow_html=True)
 
     st.set_page_config(
-        page_title="Admin, Help!",
+        page_title="DIS Help",
         page_icon="files/ico/DISg_colored.ico",
         layout="centered",
         initial_sidebar_state="collapsed"
@@ -390,8 +394,7 @@ def init_session_state():
     if not 'user_name' in st.session_state: st.session_state.user_email = "Аноним"
     # Обработка выхода
     if "other" not in st.session_state: st.session_state.other = None
-    if "cookies" not in st.session_state:
-        init_cookies()
+    init_cookie_controller()
     query_params = st.query_params
     if 'logout' not in query_params.keys():
         query_params['logout'] = "false"
@@ -416,6 +419,27 @@ def clear_selected():
     if len(st.session_state[f"файлы_{st.session_state.uploader_key}"]) > 0:
         st.session_state.uploader_key += 1
 
+def sign(value: str) -> str:
+    """Подписать значение куки, чтобы проверить целостность."""
+    secret_key = os.environ.get("COOKIES_PASSWORD", st.secrets["Крошки"]["пароль"])
+    signature = hmac.new(secret_key.encode(), value.encode(), hashlib.sha256).hexdigest()
+    return f"{value}|{signature}"
+
+def verify(signed: str) -> (str | None):
+    """Проверить подпись и вернуть оригинальное значение или None."""
+    secret_key = os.environ.get("COOKIES_PASSWORD", st.secrets["Крошки"]["пароль"])
+    if "|" not in signed:
+        return None
+    val, sig = signed.rsplit("|", 1)
+    expected = hmac.new(secret_key.encode(), val.encode(), hashlib.sha256).hexdigest()
+    if hmac.compare_digest(expected, sig):
+        return val
+    return None
+
+def init_cookie_controller():
+    ctrl = CookieController()
+    st.session_state.ctrl = ctrl
+
 def init_cookies():
     # Создание экземпляра менеджера куков
     cookies = EncryptedCookieManager(
@@ -427,13 +451,13 @@ def init_cookies():
         st.spinner("Ожидание загрузки хлебных крошек", show_time=True)
         st.stop()
 
-    st.session_state.cookies = cookies
+    st.session_state.ctrl = cookies
 
 def auto_login():
     sleep(0.5)
-    cookies = st.session_state.cookies
+    cookies = st.session_state.ctrl
     # Пробуем достать логин из куки
-    stored_username = cookies.get('username', '')
+    stored_username = cookies.get('username')
     if stored_username:
         st.session_state.auth = True
         st.session_state.user_email = stored_username
@@ -454,27 +478,35 @@ def request_info(issues):
 
 @st.dialog("Код подтверждения")
 def confirmation():
-    cookies = st.session_state.cookies
+    cookies = st.session_state.ctrl
     st.write("Код подтверждения был отправлен на вашу почту.")
     code = st.text_input("Введите код подтверждения из письма:")
     if st.button("OK"):
         if str(st.session_state.code) == code:
             st.session_state.auth = True
             if st.session_state.remember_me:
+
+                expires_at = dt.datetime.now(dt.UTC) + dt.timedelta(days=365) # 365 дней
                 # Устанавливаем cookie с сроком действия 30 дней
-                cookies['authenticated'] = 'true'
-                cookies['username'] = st.session_state.user_email
-                expires_at = int(time()) + 365 * 24 * 60 * 60  # 365 дней
-                cookies['expires_at'] = str(expires_at)
-                cookies.save()
-                st.session_state.cookies = cookies
+                cookies.set('authenticated', 'true', expires=expires_at, same_site='lax', max_age=30*24*3600)
+                cookies.set('username', st.session_state.user_email, expires=expires_at, same_site='lax', max_age=30*24*3600)
+                st.session_state.ctrl = cookies
                 # Обновляем страницу, чтобы скрыть форму входа
             st.rerun()
         else:
             st.error("Неверный код")
 
+def check_email():
+    split_email = st.session_state.user_email.split("@")
+    if len(split_email) != 2:
+        return False
+    elif split_email[1] != "dis-group.ru":
+        return False
+    return True
+
+
 def request(object: str):
-    cookies = st.session_state.cookies
+    cookies = st.session_state.ctrl
     auto_logged_in = auto_login()
     # Если пользователь не аутентифицирован, показываем форму входа
     if not st.session_state.auth and not auto_logged_in:
@@ -489,10 +521,12 @@ def request(object: str):
             submit_button = st.form_submit_button(
                 "Вход", use_container_width=True)
             if submit_button:
-                st.session_state.code = randint(10000,99999)
-                send_code_email()
-                confirmation()
-
+                if check_email():
+                    st.session_state.code = randint(10000,99999)
+                    send_code_email()
+                    confirmation()
+                else:
+                    st.error("Неправильная почта.")
     else:
         """Форма создания заявки с st.pills и множественным выбором"""
         base_path = Path(__file__).parent
@@ -526,7 +560,7 @@ def request(object: str):
                 </form>
             </div>
             """, unsafe_allow_html=True)
-        saved_username = cookies.get('username', '')
+        saved_username = cookies.get('username')
         if saved_username:
             st.session_state.user_email = saved_username
 
@@ -553,11 +587,9 @@ def request(object: str):
         if st.session_state.logout:
             # Сброс данных сессии
             st.session_state.auth = False
-            cookies['authenticated'] = 'false'
-            cookies['username'] = ''
-            cookies['expires_at'] = '0'
-            cookies.save()
-            st.session_state.cookies = cookies
+            cookies.remove('authenticated')
+            cookies.remove('username')
+            st.session_state.ctrl = cookies
             st.query_params["logout"] = "false"
             st.switch_page("qr.py")
 

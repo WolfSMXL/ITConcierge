@@ -18,13 +18,13 @@ st.markdown('<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootst
 img_bytes = Path("files/png/DISg_colored.png").read_bytes()
 encoded_img = base64.b64encode(img_bytes).decode()
 img_html = "data:image/png;base64,{}".format(encoded_img)
-st.markdown(f"""
-<nav class="navbar fixed-top navbar-dark" id="navbar">
-  <a href="https://jira.data-integration.ru/plugins/servlet/desk">
-    <img src="{img_html}" width=30 class="navbar-brand" target="_blank"></img>
-  </a>
-</nav>
-""", unsafe_allow_html=True)
+# st.markdown(f"""
+# <nav class="navbar fixed-top navbar-dark" id="navbar">
+#   <a href="https://jira.data-integration.ru/plugins/servlet/desk">
+#     <img src="{img_html}" width=30 class="navbar-brand" target="_blank"></img>
+#   </a>
+# </nav>
+# """, unsafe_allow_html=True)
 
 hide_decoration_bar_style = '''
     <style>
@@ -39,7 +39,7 @@ st.markdown(hide_decoration_bar_style, unsafe_allow_html=True)
 
 # Настроить название страницы и логотип в заголовке обозревателя
 st.set_page_config(
-    page_title="Admin, Help!",
+    page_title="DIS Help",
     page_icon="files/ico/DISg_colored.ico",
     layout="centered",
     initial_sidebar_state="collapsed"
