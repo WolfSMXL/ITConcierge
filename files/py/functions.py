@@ -12,6 +12,9 @@ from time import sleep, time
 from urllib.parse import urlencode
 from random import randint
 
+from cryptography.fernet import Fernet
+from streamlit_local_storage import LocalStorage
+
 import streamlit as st
 from exchangelib import DELEGATE, Account, Credentials, Message, Mailbox, HTMLBody
 from jira import JIRA
@@ -394,7 +397,7 @@ def init_session_state():
     if not 'user_name' in st.session_state: st.session_state.user_email = "Аноним"
     # Обработка выхода
     if "other" not in st.session_state: st.session_state.other = None
-    init_cookie_controller()
+    init_local_storage()
     query_params = st.query_params
     if 'logout' not in query_params.keys():
         query_params['logout'] = "false"
@@ -406,6 +409,8 @@ def init_session_state():
         st.session_state.code = 0
     if "uploader_key" not in st.session_state:
         st.session_state.uploader_key = 0
+    if "key" not in st.session_state:
+        st.session_state.key = st.secrets["Крошки"]["пароль"]
 
 def clear_selected():
     if "technical_problems" in st.session_state:
@@ -436,6 +441,9 @@ def verify(signed: str) -> (str | None):
         return val
     return None
 
+def init_local_storage():
+    st.session_state.local_s = LocalStorage()
+
 def init_cookie_controller():
     ctrl = CookieController()
     st.session_state.ctrl = ctrl
@@ -455,9 +463,8 @@ def init_cookies():
 
 def auto_login():
     sleep(0.5)
-    cookies = st.session_state.ctrl
-    # Пробуем достать логин из куки
-    stored_username = cookies.get('username')
+    local_s = st.session_state.local_s
+    stored_username = local_s.getItem('username')
     if stored_username:
         st.session_state.auth = True
         st.session_state.user_email = stored_username
@@ -468,8 +475,8 @@ def auto_login():
 def request_info(issues):
     issues_text = ""
     for i in issues:
-        issues_text += f"[{str(i['issue'].key)}]({os.getenv('JIRA_SERVER').rstrip(r"/")}/browse/{i['issue']}), "
-    st.write(f"Заявка ({issues_text.rstrip(", ")}) успешно создана! Уведомления о статусе заявки буду приходить на  вашу почту.")
+        issues_text += f"[{str(i['issue'].key)}]({os.getenv('JIRA_SERVER').rstrip(r'/')}/browse/{i['issue']}), "
+    st.write(f"Заявка ({issues_text.rstrip(', ')}) успешно создана! Уведомления о статусе заявки буду приходить на  вашу почту.")
     if st.session_state.printer_connect and not st.session_state.anonymous:
         st.write("Инструкция по подключению принтера была отправлена на вашу почту")
     if st.button("OK"):
@@ -478,23 +485,33 @@ def request_info(issues):
 
 @st.dialog("Код подтверждения")
 def confirmation():
-    cookies = st.session_state.ctrl
+    local_s = st.session_state.local_s
     st.write("Код подтверждения был отправлен на вашу почту.")
     code = st.text_input("Введите код подтверждения из письма:")
     if st.button("OK"):
         if str(st.session_state.code) == code:
             st.session_state.auth = True
             if st.session_state.remember_me:
+                #expires_at = dt.datetime.now(dt.UTC) + dt.timedelta(days=365) # 365 дней
+                #cookies.set('authenticated', 'true', expires=expires_at, same_site='lax', max_age=30*24*3600)
+                #cookies.set('username', st.session_state.user_email, expires=expires_at, same_site='lax', max_age=30*24*3600)
+                #st.session_state.ctrl = cookies
+                local_s.setItem('username', st.session_state.user_email, key='local_storage_username')
 
-                expires_at = dt.datetime.now(dt.UTC) + dt.timedelta(days=365) # 365 дней
-                # Устанавливаем cookie с сроком действия 30 дней
-                cookies.set('authenticated', 'true', expires=expires_at, same_site='lax', max_age=30*24*3600)
-                cookies.set('username', st.session_state.user_email, expires=expires_at, same_site='lax', max_age=30*24*3600)
-                st.session_state.ctrl = cookies
-                # Обновляем страницу, чтобы скрыть форму входа
+                #local_s.setItem('authenticated', True, key='local_storage_authenticated')
+                st.session_state.local_s = local_s
             st.rerun()
         else:
             st.error("Неверный код")
+
+def encode_string(string: str):
+
+    cipher_suite = Fernet(st.session_state.key)
+    return cipher_suite.encrypt(bytes(string, 'utf-8'))
+
+def decode_string(string: str):
+    cipher_suite = Fernet(st.session_state.key)
+    return cipher_suite.encrypt(bytes(string, 'utf-8'))
 
 def check_email():
     split_email = st.session_state.user_email.split("@")
@@ -504,9 +521,8 @@ def check_email():
         return False
     return True
 
-
 def request(object: str):
-    cookies = st.session_state.ctrl
+    local_s = st.session_state.local_s
     auto_logged_in = auto_login()
     # Если пользователь не аутентифицирован, показываем форму входа
     if not st.session_state.auth and not auto_logged_in:
@@ -560,7 +576,7 @@ def request(object: str):
                 </form>
             </div>
             """, unsafe_allow_html=True)
-        saved_username = cookies.get('username')
+        saved_username = local_s.getItem('username')
         if saved_username:
             st.session_state.user_email = saved_username
 
@@ -587,9 +603,11 @@ def request(object: str):
         if st.session_state.logout:
             # Сброс данных сессии
             st.session_state.auth = False
-            cookies.remove('authenticated')
-            cookies.remove('username')
-            st.session_state.ctrl = cookies
+            #cookies.remove('authenticated')
+            #cookies.remove('username')
+            #local_s.removeItem('authenticated', key='local_storage_authenticated')
+            local_s.deleteItem('username')
+            sleep(0.5)
             st.query_params["logout"] = "false"
             st.switch_page("qr.py")
 
