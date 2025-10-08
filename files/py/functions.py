@@ -419,6 +419,10 @@ def init_session_state():
         st.session_state.code = 0
     if "uploader_key" not in st.session_state:
         st.session_state.uploader_key = 0
+    if 'disable_login_bt' not in st.session_state:
+        st.session_state.disable_login_bt = False
+    if 'disable_request_bt' not in st.session_state:
+        st.session_state.disable_request_bt = False
 
 
 def clear_selected():
@@ -489,6 +493,7 @@ def request_info(issues):
     if st.session_state.printer_connect and not st.session_state.anonymous:
         st.write("Инструкция по подключению принтера была отправлена на вашу почту")
     if st.button("OK"):
+        st.session_state.disable_request_bt = False
         clear_selected()
         st.rerun()
 
@@ -523,6 +528,12 @@ def check_email():
         return False
     return True
 
+def disable_login_bt():
+    st.session_state.disable_login_bt = True
+
+def disable_request_bt():
+    st.session_state.disable_request_bt = True
+
 def request(object: str):
     local_s = st.session_state.local_s
     auto_logged_in = auto_login()
@@ -532,19 +543,23 @@ def request(object: str):
         st.markdown("<h3 style='text-align: center;'>Добро пожаловать в DIS Help!</h3>", unsafe_allow_html=True)
         c1, c2, c3 = st.columns([1, 4, 1])
         with c2.form("auth_form"):
-            # st.image("files/png/Jira.webp", use_container_width=True)
             st.write("Для авторизации введите вашу электронную почту:")
             st.session_state.user_email = st.text_input("Почта", label_visibility="collapsed")
             st.session_state.remember_me = st.checkbox("Запомнить", value=True)
             submit_button = st.form_submit_button(
-                "Вход", use_container_width=True)
+                "Вход", use_container_width=True,
+                on_click=disable_login_bt, disabled=st.session_state.disable_login_bt)
             if submit_button:
                 if check_email():
                     st.session_state.code = randint(10000,99999)
                     send_code_email()
+                    st.session_state.disable_login_bt = False
                     confirmation()
                 else:
                     st.error("Неправильная почта.")
+                    st.session_state.disable_login_bt = False
+                    sleep(1)
+                    st.rerun()
     else:
         """Форма создания заявки с st.pills и множественным выбором"""
         base_path = Path(__file__).parent
@@ -775,24 +790,30 @@ def request(object: str):
                      """
             st.markdown(hide_label, unsafe_allow_html=True)
 
-            if st.button("Отправить заявку"):
+            if st.button("Отправить заявку", on_click=disable_request_bt,
+                         disabled=st.session_state.disable_request_bt):
 
                 build_request(problems_dict)
                 if not check_object():
                     st.error("Не выбран объект!")
                     sleep(1)
+                    st.session_state.disable_request_bt = False
+                    st.rerun()
                 else:
                     if not check_fields():
                         st.error("Форма не заполнена!")
                         sleep(1)
+                        st.session_state.disable_request_bt = False
+                        st.rerun()
                     else:
                         #st.info("Проверки выполнены...")
                         #st.info(st.session_state.request_body)
                         #st.info("Приложенных файлов: " + \
                         #        str(len(st.session_state[f"файлы_{st.session_state.uploader_key}"])))
                         create_tasks(st.session_state.request_body, st.session_state[f"файлы_{st.session_state.uploader_key}"])
-                        sleep(1)
+                        #sleep(1)
                         #st.rerun()
+
             st.divider()
         elif st.session_state.request_sent:
             st.success("Ваша заявка отправлена!")
