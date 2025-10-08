@@ -105,19 +105,21 @@ def send_email():
             if i[0] == st.session_state.object:
                 connection_link = i[1]
 
+    username = str(decode_string(os.getenv("OUTLOOK_TECH_LOGIN").encode()), 'utf-8')
+    password = str(decode_string(os.getenv("OUTLOOK_TECH_PASSWORD").encode()), 'utf-8')
     credentials = Credentials(
-        username=os.getenv("OUTLOOK_TECH_LOGIN"),
-        password=os.getenv("OUTLOOK_TECH_PASSWORD")
+        username=username,
+        password=password
     )
     a = Account(
-        primary_smtp_address=os.getenv("OUTLOOK_TECH_LOGIN"),
+        primary_smtp_address=username,
         credentials=credentials,
         autodiscover=True,
         access_type=DELEGATE
     )
 
     email = EmailMessage()
-    email["From"] = os.getenv("OUTLOOK_TECH_LOGIN")
+    email["From"] = username
     email["To"] = st.session_state.user_email
     email["Subject"] = "Инструкция по подключению принтера"
 
@@ -139,19 +141,22 @@ def send_email():
     m.send()
 
 def send_code_email():
+    username = str(decode_string(os.getenv("OUTLOOK_TECH_LOGIN").encode()), 'utf-8')
+    password = str(decode_string(os.getenv("OUTLOOK_TECH_PASSWORD").encode()), 'utf-8')
+
     credentials = Credentials(
-        username=os.getenv("OUTLOOK_TECH_LOGIN"),
-        password=os.getenv("OUTLOOK_TECH_PASSWORD")
+        username=username,
+        password=password
     )
     a = Account(
-        primary_smtp_address=os.getenv("OUTLOOK_TECH_LOGIN"),
+        primary_smtp_address=username,
         credentials=credentials,
         autodiscover=True,
         access_type=DELEGATE
     )
 
     email = EmailMessage()
-    email["From"] = os.getenv("OUTLOOK_TECH_LOGIN")
+    email["From"] = username
     email["To"] = st.session_state.user_email
     email["Subject"] = "Код подтверждения для входа в DIS Help"
 
@@ -363,13 +368,18 @@ def checks() -> None:
     return None
 
 def init_session_state():
+    if "key" not in st.session_state:
+        st.session_state.key = st.secrets["Крошки"]["fernet_key"]
     # Соединение с Jira
     if 'jira' not in st.session_state:
         try:
-            basic_auth = (os.getenv("JIRA_TECH_LOGIN"), os.getenv("JIRA_TECH_PASSWORD"))
+            basic_auth = (str(decode_string(os.getenv("JIRA_TECH_LOGIN").encode()), 'utf-8'),
+                          str(decode_string(os.getenv("JIRA_TECH_PASSWORD").encode()), 'utf-8'))
             jira = JIRA(
                 options={"server": os.getenv("JIRA_SERVER")},
-                basic_auth=basic_auth
+                basic_auth=basic_auth,
+                max_retries=5,
+                logging=True
             )
         except Exception as e:
             print(str(e))
@@ -409,8 +419,7 @@ def init_session_state():
         st.session_state.code = 0
     if "uploader_key" not in st.session_state:
         st.session_state.uploader_key = 0
-    if "key" not in st.session_state:
-        st.session_state.key = st.secrets["Крошки"]["пароль"]
+
 
 def clear_selected():
     if "technical_problems" in st.session_state:
@@ -492,26 +501,19 @@ def confirmation():
         if str(st.session_state.code) == code:
             st.session_state.auth = True
             if st.session_state.remember_me:
-                #expires_at = dt.datetime.now(dt.UTC) + dt.timedelta(days=365) # 365 дней
-                #cookies.set('authenticated', 'true', expires=expires_at, same_site='lax', max_age=30*24*3600)
-                #cookies.set('username', st.session_state.user_email, expires=expires_at, same_site='lax', max_age=30*24*3600)
-                #st.session_state.ctrl = cookies
                 local_s.setItem('username', st.session_state.user_email, key='local_storage_username')
-
-                #local_s.setItem('authenticated', True, key='local_storage_authenticated')
                 st.session_state.local_s = local_s
             st.rerun()
         else:
             st.error("Неверный код")
 
 def encode_string(string: str):
-
     cipher_suite = Fernet(st.session_state.key)
     return cipher_suite.encrypt(bytes(string, 'utf-8'))
 
-def decode_string(string: str):
+def decode_string(string: bytes):
     cipher_suite = Fernet(st.session_state.key)
-    return cipher_suite.encrypt(bytes(string, 'utf-8'))
+    return cipher_suite.decrypt(string)
 
 def check_email():
     split_email = st.session_state.user_email.split("@")
