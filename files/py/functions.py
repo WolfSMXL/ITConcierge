@@ -5,7 +5,7 @@ import hmac
 import io
 import os
 import re
-import datetime as dt
+import magic
 from email.message import EmailMessage
 from pathlib import Path
 from time import sleep, time
@@ -183,6 +183,7 @@ def exit(auth_manager):
                     st.rerun()
 
 def create_tasks(body: str, files: list) -> None:
+    allowed_ext = ["image/jpeg", "image/png"]
     jira = st.session_state.jira
     projects = jira.projects()
     admin_help = -1
@@ -260,7 +261,11 @@ def create_tasks(body: str, files: list) -> None:
                 for j in files:
                     bytesio = io.BytesIO(j.getvalue())
                     bytesio.seek(0)
-                    jira.add_attachment(issue=i["issue"], attachment=bytesio, filename=j.name)
+                    extension = magic.from_buffer(bytesio.read(16), mime=True)
+                    if extension in allowed_ext:
+                        jira.add_attachment(issue=i["issue"], attachment=bytesio, filename=j.name)
+                    else:
+                        st.session_state.wrong_files.append(j.name)
 
         if not st.session_state.anonymous and st.session_state.printer_connect:
             send_email()
@@ -419,11 +424,11 @@ def init_session_state():
         st.session_state.code = 0
     if "uploader_key" not in st.session_state:
         st.session_state.uploader_key = 0
-    if 'disable_login_bt' not in st.session_state:
+    if "disable_login_bt" not in st.session_state:
         st.session_state.disable_login_bt = False
-    if 'disable_request_bt' not in st.session_state:
+    if "disable_request_bt" not in st.session_state:
         st.session_state.disable_request_bt = False
-
+    st.session_state.wrong_files = []
 
 def clear_selected():
     if "technical_problems" in st.session_state:
@@ -492,6 +497,10 @@ def request_info(issues):
     st.write(f"Заявка ({issues_text.rstrip(', ')}) успешно создана! Уведомления о статусе заявки буду приходить на  вашу почту.")
     if st.session_state.printer_connect and not st.session_state.anonymous:
         st.write("Инструкция по подключению принтера была отправлена на вашу почту")
+    if len(st.session_state.wrong_files) > 0:
+        st.write("Следующие файлы не были загружены (формат файла не jpg, png, jpeg):")
+        for i in st.session_state.wrong_files:
+            st.write(f"- {i}")
     if st.button("OK"):
         st.session_state.disable_request_bt = False
         clear_selected()
@@ -773,8 +782,7 @@ def request(object: str):
 
             st.file_uploader("Добавить вложение",
                              key=f"файлы_{st.session_state.uploader_key}",
-                             type=["jpg", "jpeg", "png", "pdf", "doc",
-                                   "docx", "xls", "xlsx"],
+                             type=["jpg", "jpeg", "png"],
                              accept_multiple_files=True)
 
             hide_label = """
