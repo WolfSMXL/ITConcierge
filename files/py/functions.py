@@ -3,6 +3,7 @@ import csv
 import hashlib
 import hmac
 import io
+import json
 import os
 import re
 import magic
@@ -20,6 +21,7 @@ from exchangelib import DELEGATE, Account, Credentials, Message, Mailbox, HTMLBo
 from jira import JIRA
 from streamlit_cookies_controller import CookieController
 from streamlit_cookies_manager import EncryptedCookieManager
+from streamlit.components.v1 import html as st_html
 
 
 def hide_sidebar():
@@ -253,6 +255,7 @@ def create_tasks(body: str, files: list) -> None:
 
     try:
         issues = jira.create_issues(issues_list)
+        st.session_state.issues = issues
         if not st.session_state.anonymous:
             for i in issues:
                 i["issue"].update(reporter={'name': st.session_state.user.name})
@@ -269,7 +272,9 @@ def create_tasks(body: str, files: list) -> None:
 
         if not st.session_state.anonymous and st.session_state.printer_connect:
             send_email()
-        request_info(issues)
+        st.session_state.req_info = True
+        st.rerun()
+        #request_info(issues)
     except Exception as e:
         if "CAPTCHA_CHALLENGE" in str(e):
             # Логика обработки капчи
@@ -294,15 +299,16 @@ def build_request(problems_dict) -> None:
                 line_end = ""
                 if _ == "Проблемы с оборудованием":
                     if "equipment" in st.session_state or "other_equipment" in st.session_state:
-                        line_end += " ("
-                        if "equipment" in st.session_state:
-                            for j in st.session_state.equipment:
-                                line_end += j + ", "
-                        if "other_equipment" in st.session_state:
-                            for j in st.session_state.other_equipment:
-                                line_end += j
-                        line_end = line_end.rstrip(", ")
-                        line_end += ")"
+                        if len(st.session_state.equipment) > 0 or len(st.session_state.other_equipment) > 0:
+                            line_end += " ("
+                            if "equipment" in st.session_state:
+                                for j in st.session_state.equipment:
+                                    line_end += j + ", "
+                            if "other_equipment" in st.session_state:
+                                for j in st.session_state.other_equipment:
+                                    line_end += j
+                            line_end = line_end.rstrip(", ")
+                            line_end += ")"
 
                 line_end += "\n"
                 st.session_state.request_body += str(i) + ") " + _ + line_end
@@ -314,13 +320,29 @@ def build_request(problems_dict) -> None:
         for _ in problems_dict["Обслуживание"]:
             if _ in st.session_state.service_problems:
                 if i == 1: st.session_state.request_body += "Обслуживающему персоналу:\n\n"
-                st.session_state.request_body += str(i) + ") " + _ + "\n"
+
+                line_end = ""
+                if _ == "Проблемы с мебелью":
+                    if "other_furniture" in st.session_state and len(st.session_state.other_furniture) > 0:
+                        line_end += " ("
+                        for j in st.session_state.other_furniture:
+                            line_end += j
+                        line_end = line_end.rstrip(", ")
+                        line_end += ")"
+
+                line_end += "\n"
+
+                st.session_state.request_body += str(i) + ") " + _ + line_end
                 i += 1
     if i != 1:
         st.session_state.request_body += "\n"
     i = 1
-    if st.session_state.other:
-        st.session_state.request_body += "Другие предложения:\n\n" + st.session_state.other.strip()
+    if st.session_state.other_it or st.session_state.other_serv:
+        if not st.session_state.other:
+            other_text = " "
+        else:
+            other_text = st.session_state.other
+        st.session_state.request_body += "Другие предложения:\n\n" + other_text
     return None
 
 def check_object() -> bool:
@@ -409,7 +431,7 @@ def init_session_state():
     if not 'user' in st.session_state: st.session_state.user = st.query_params.get(
         'user', "Аноним")
     # Имя пользователя
-    if not 'user_name' in st.session_state: st.session_state.user_email = "Аноним"
+    if not 'user_email' in st.session_state: st.session_state.user_email = "Аноним"
     # Обработка выхода
     if "other" not in st.session_state: st.session_state.other = None
     init_local_storage()
@@ -429,6 +451,31 @@ def init_session_state():
     if "disable_request_bt" not in st.session_state:
         st.session_state.disable_request_bt = False
     st.session_state.wrong_files = []
+    if "req_info" not in st.session_state:
+        st.session_state.req_info = False
+    render_logout_btn()
+
+def render_logout_btn():
+    if st.session_state.get("auth"):
+        auth = "true"
+    else:
+        auth = "false"
+    username = st.session_state.get("user_email") or ""
+
+    payload = {"type": "auth_state", "auth": auth.lower(), "username": username}
+
+
+    st_html(f"""
+    <script>
+      (function() {{
+        var data = {json.dumps(payload)};
+        // Отправка в родительский frame
+        if (window.parent && window.parent !== window) {{
+          window.parent.postMessage(data, "*"); // в проде лучше указать точный origin
+        }}
+      }})();
+    </script>
+    """, height=0)
 
 def clear_selected():
     if "technical_problems" in st.session_state:
@@ -462,23 +509,6 @@ def verify(signed: str) -> (str | None):
 def init_local_storage():
     st.session_state.local_s = LocalStorage()
 
-def init_cookie_controller():
-    ctrl = CookieController()
-    st.session_state.ctrl = ctrl
-
-def init_cookies():
-    # Создание экземпляра менеджера куков
-    cookies = EncryptedCookieManager(
-        prefix=st.secrets["Крошки"]["префикс"],
-        password=os.environ.get("COOKIES_PASSWORD", st.secrets["Крошки"]["пароль"])
-    )
-
-    if not cookies.ready():
-        st.spinner("Ожидание загрузки хлебных крошек", show_time=True)
-        st.stop()
-
-    st.session_state.ctrl = cookies
-
 def auto_login():
     sleep(0.5)
     local_s = st.session_state.local_s
@@ -494,13 +524,14 @@ def request_info(issues):
     issues_text = ""
     for i in issues:
         issues_text += f"[{str(i['issue'].key)}]({os.getenv('JIRA_SERVER').rstrip(r'/')}/browse/{i['issue']}), "
-    st.write(f"Заявка ({issues_text.rstrip(', ')}) успешно создана! Уведомления о статусе заявки буду приходить на  вашу почту.")
+    st.write(f"Заявка ({issues_text.rstrip(', ')}) успешно создана! Уведомления о статусе заявки будут приходить на  вашу почту.")
     if st.session_state.printer_connect and not st.session_state.anonymous:
         st.write("Инструкция по подключению принтера была отправлена на вашу почту")
     if len(st.session_state.wrong_files) > 0:
         st.write("Следующие файлы не были загружены (формат файла не jpg, png, jpeg):")
         for i in st.session_state.wrong_files:
             st.write(f"- {i}")
+    st.write("Спасибо за заявку! Ваша техническая поддержка")
     if st.button("OK"):
         st.session_state.disable_request_bt = False
         clear_selected()
@@ -547,7 +578,56 @@ def request(object: str):
     local_s = st.session_state.local_s
     auto_logged_in = auto_login()
     # Если пользователь не аутентифицирован, показываем форму входа
-    if not st.session_state.auth and not auto_logged_in:
+    if st.session_state.req_info:
+        # Кнопка, встроенная через HTML-форму + query-параметр
+        st.markdown("""
+                    <style>
+                    #fixed-logout {
+                        position: fixed;
+                        top: 10px;
+                        right: 20px;
+                        z-index: 9999;
+                    }
+                    #fixed-logout button {
+                        font-weight: bold;
+                        padding: 8px 16px;
+                        border: none;
+                        border-radius: 5px;
+                        cursor: pointer;
+                    }
+                    </style>
+
+                    <div id="fixed-logout">
+                        <form method="get">
+                            <input type="hidden" name="logout" value="true">
+                            <button>Выйти</button>
+                        </form>
+                    </div>
+                    """, unsafe_allow_html=True)
+        # Обработка выхода
+        if st.session_state.logout:
+            # Сброс данных сессии
+            st.session_state.auth = False
+            local_s.deleteItem('username')
+            sleep(0.5)
+            st.query_params["logout"] = "false"
+            st.switch_page("qr.py")
+
+        issues_text = ""
+        issues = st.session_state.issues
+        for i in issues:
+            issues_text += f"[{str(i['issue'].key)}]({os.getenv('JIRA_SERVER').rstrip(r'/')}/browse/{i['issue']}), "
+        st.write(
+            f"Заявка ({issues_text.rstrip(', ')}) успешно создана! Уведомления о статусе заявки будут приходить на  вашу почту.")
+        if st.session_state.printer_connect and not st.session_state.anonymous:
+            st.write("Инструкция по подключению принтера была отправлена на вашу почту")
+        if len(st.session_state.wrong_files) > 0:
+            st.write("Следующие файлы не были загружены (формат файла не jpg, png, jpeg):")
+            for i in st.session_state.wrong_files:
+                st.write(f"- {i}")
+        st.write("Спасибо за заявку! Ваша техническая поддержка")
+        st.session_state.req_info = False
+    elif not st.session_state.auth and not auto_logged_in:
         st.empty()
         st.markdown("<h3 style='text-align: center;'>Добро пожаловать в DIS Help!</h3>", unsafe_allow_html=True)
         c1, c2, c3 = st.columns([1, 4, 1])
@@ -555,9 +635,11 @@ def request(object: str):
             st.write("Для авторизации введите вашу электронную почту:")
             st.session_state.user_email = st.text_input("Почта", label_visibility="collapsed")
             st.session_state.remember_me = st.checkbox("Запомнить", value=True)
+            # submit_button = st.form_submit_button(
+            #     "Вход", use_container_width=True,
+            #     on_click=disable_login_bt, disabled=st.session_state.disable_login_bt)
             submit_button = st.form_submit_button(
-                "Вход", use_container_width=True,
-                on_click=disable_login_bt, disabled=st.session_state.disable_login_bt)
+                "Вход", use_container_width=True)
             if submit_button:
                 if check_email():
                     st.session_state.code = randint(10000,99999)
@@ -667,7 +749,6 @@ def request(object: str):
         problems_dict["Обслуживание"] = service_problems
 
         if (not st.session_state.request_sent) and (not st.session_state.request):
-            st.divider()
 
             if object != "":
                 st.session_state.object = object
@@ -761,7 +842,10 @@ def request(object: str):
                 if left_text is not None:
                     left_text.text_area("Другое оборудование", key="other_equipment", placeholder="Другое оборудование", label_visibility="collapsed")
                 if right_text is not None:
-                    right_text.text_area("Другая причина обращения", key="other", placeholder="Другая причина обращения", label_visibility="collapsed")
+                    right_text.text_area("Другая причина обращения", key="other", placeholder="Опишите ситуацию", label_visibility="collapsed")
+
+                if "Проблемы с мебелью" in serv_chosen_problems:
+                    st.text_area("Коментарии к проблеме с мебелью", key="other_furniture", placeholder="Опишите ситуацию с мебелью", label_visibility="collapsed")
 
                 if "Другой запрос в ИТ" in tech_chosen_problems:
                     st.session_state.other_it = True
@@ -798,8 +882,10 @@ def request(object: str):
                      """
             st.markdown(hide_label, unsafe_allow_html=True)
 
-            if st.button("Отправить заявку", on_click=disable_request_bt,
-                         disabled=st.session_state.disable_request_bt):
+            #st.button("Отправить заявку", on_click=disable_request_bt,
+            #          disabled=st.session_state.disable_request_bt)
+
+            if st.button("Отправить заявку"):
 
                 build_request(problems_dict)
                 if not check_object():
@@ -822,7 +908,6 @@ def request(object: str):
                         #sleep(1)
                         #st.rerun()
 
-            st.divider()
         elif st.session_state.request_sent:
             st.success("Ваша заявка отправлена!")
             if st.button("Новая заявка"):
