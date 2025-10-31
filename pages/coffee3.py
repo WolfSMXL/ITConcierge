@@ -13,7 +13,7 @@ def main():
       # Форма заявки
         try:
             request(
-                object="Кофе-машина на кухне 3го этажа"
+                object="Кофемашина на кухне 3го этажа"
             )
         except Exception as e:
             st.error(f"Ошибка при создании заявки: {str(e)}")

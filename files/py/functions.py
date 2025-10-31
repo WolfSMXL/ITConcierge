@@ -19,8 +19,6 @@ from streamlit_local_storage import LocalStorage
 import streamlit as st
 from exchangelib import DELEGATE, Account, Credentials, Message, Mailbox, HTMLBody
 from jira import JIRA
-from streamlit_cookies_controller import CookieController
-from streamlit_cookies_manager import EncryptedCookieManager
 from streamlit.components.v1 import html as st_html
 
 
@@ -50,6 +48,37 @@ def setup_page_config():
     '''
     st.markdown(hide_decoration_bar_style, unsafe_allow_html=True)
 
+    st.markdown("""
+    <style>
+    header[data-testid="stHeader"] { height: 0; visibility: hidden; }   /* можно убрать, если нужен штатный хедер */
+    div[data-testid="stAppViewContainer"] > .main { padding-top: 0 !important; }
+
+    /* Верхняя полоса внутри контент-колонки (в обычном потоке, без fixed) */
+    .page-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 0;         /* уменьшенный вертикальный зазор */
+    }
+
+    /* Кнопка справа */
+    .page-top .btn {
+      display: inline-block;
+      padding: 8px 14px;
+      border: 1px solid rgba(49,51,63,.25);
+      border-radius: 6px;
+      text-decoration: none;
+      font-weight: 600;
+      white-space: nowrap;     /* без переноса на мобилках */
+      background: var(--background-color);
+      color: var(--text-color);
+      box-shadow: 0 1px 2px rgba(0,0,0,.06);
+    }
+    .page-top .btn:hover { filter: brightness(.97); }
+    </style>
+    """, unsafe_allow_html=True)
+
     st.markdown(
         '<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">',
         unsafe_allow_html=True)
@@ -58,17 +87,23 @@ def setup_page_config():
     encoded_img = base64.b64encode(img_bytes).decode()
     img_html = "data:image/png;base64,{}".format(encoded_img)
     st.markdown(f"""
-    <nav class="navbar fixed-top navbar-expand-lg navbar-dark">
-      <a href="https://jira.data-integration.ru/plugins/servlet/desk">
-        <img src="{img_html}" width=30 class="navbar-brand" target="_blank"></img>
-      </a>
-    </nav>
+    <div class="page-top">
+        <a href="https://jira.data-integration.ru/plugins/servlet/desk">
+            <img src="{img_html}" width=30 class="navbar-brand" target="_blank"></img>
+        </a>
+        <div id="fixed-logout">
+            <form method="get">
+                <input type="hidden" name="logout" value="true">
+                <button>Выйти</button>
+            </form>
+        </div>
+    </div>
     """, unsafe_allow_html=True)
 
     st.set_page_config(
         page_title="DIS Help",
         page_icon="files/ico/DISg_colored.ico",
-        layout="centered",
+        layout="wide",
         initial_sidebar_state="collapsed"
     )
 
@@ -320,15 +355,12 @@ def build_request(problems_dict) -> None:
         for _ in problems_dict["Обслуживание"]:
             if _ in st.session_state.service_problems:
                 if i == 1: st.session_state.request_body += "Обслуживающему персоналу:\n\n"
-
                 line_end = ""
                 if _ == "Проблемы с мебелью":
-                    if "other_furniture" in st.session_state and len(st.session_state.other_furniture) > 0:
-                        line_end += " ("
-                        for j in st.session_state.other_furniture:
-                            line_end += j
-                        line_end = line_end.rstrip(", ")
-                        line_end += ")"
+                    if st.session_state.other_furniture:
+                        add_text = re.sub(r'\n{2,}', '\n', st.session_state.other)
+                        add_text = re.sub(r'\n', ';', add_text)
+                        line_end += " (" + add_text + ") "
 
                 line_end += "\n"
 
@@ -453,29 +485,26 @@ def init_session_state():
     st.session_state.wrong_files = []
     if "req_info" not in st.session_state:
         st.session_state.req_info = False
-    render_logout_btn()
 
 def render_logout_btn():
-    if st.session_state.get("auth"):
-        auth = "true"
-    else:
-        auth = "false"
-    username = st.session_state.get("user_email") or ""
+    auth = st.session_state.get("auth")
 
-    payload = {"type": "auth_state", "auth": auth.lower(), "username": username}
-
+    payload = {"type": "auth_state", "auth": auth}
 
     st_html(f"""
-    <script>
-      (function() {{
-        var data = {json.dumps(payload)};
-        // Отправка в родительский frame
-        if (window.parent && window.parent !== window) {{
-          window.parent.postMessage(data, "*"); // в проде лучше указать точный origin
-        }}
-      }})();
-    </script>
-    """, height=0)
+        <script>
+          (function() {{
+            var data = {json.dumps(payload)};
+            try {{
+              if (window.top && window.top !== window) {{
+                window.top.postMessage(data, "*"); // фильтрация — в родителе
+              }}
+            }} catch (_) {{}}
+            // Для отладки (можно убрать):
+            // console.log("Message sent from srcdoc", data);
+          }})();
+        </script>
+        """, height=0)
 
 def clear_selected():
     if "technical_problems" in st.session_state:
@@ -577,6 +606,7 @@ def disable_request_bt():
 def request(object: str):
     local_s = st.session_state.local_s
     auto_logged_in = auto_login()
+    #render_logout_btn()
     # Если пользователь не аутентифицирован, показываем форму входа
     if st.session_state.req_info:
         # Кнопка, встроенная через HTML-форму + query-параметр
@@ -660,30 +690,30 @@ def request(object: str):
         objects_problems_file_path = (base_path / "../csv/problems_objects.csv").resolve()
 
         # Кнопка, встроенная через HTML-форму + query-параметр
-        st.markdown("""
-            <style>
-            #fixed-logout {
-                position: fixed;
-                top: 10px;
-                right: 20px;
-                z-index: 9999;
-            }
-            #fixed-logout button {
-                font-weight: bold;
-                padding: 8px 16px;
-                border: none;
-                border-radius: 5px;
-                cursor: pointer;
-            }
-            </style>
-    
-            <div id="fixed-logout">
-                <form method="get">
-                    <input type="hidden" name="logout" value="true">
-                    <button>Выйти</button>
-                </form>
-            </div>
-            """, unsafe_allow_html=True)
+        # st.markdown("""
+        #     <style>
+        #     #fixed-logout {
+        #         position: fixed;
+        #         top: 10px;
+        #         right: 20px;
+        #         z-index: 9999;
+        #     }
+        #     #fixed-logout button {
+        #         font-weight: bold;
+        #         padding: 8px 16px;
+        #         border: none;
+        #         border-radius: 5px;
+        #         cursor: pointer;
+        #     }
+        #     </style>
+        #
+        #     <div id="fixed-logout">
+        #         <form method="get">
+        #             <input type="hidden" name="logout" value="true">
+        #             <button>Выйти</button>
+        #         </form>
+        #     </div>
+        #     """, unsafe_allow_html=True)
         saved_username = local_s.getItem('username')
         if saved_username:
             st.session_state.user_email = saved_username
@@ -711,9 +741,6 @@ def request(object: str):
         if st.session_state.logout:
             # Сброс данных сессии
             st.session_state.auth = False
-            #cookies.remove('authenticated')
-            #cookies.remove('username')
-            #local_s.removeItem('authenticated', key='local_storage_authenticated')
             local_s.deleteItem('username')
             sleep(0.5)
             st.query_params["logout"] = "false"
@@ -832,7 +859,7 @@ def request(object: str):
                 if "Проблемы с оборудованием" in tech_chosen_problems:
                     left_text = st
 
-                if "Другой запрос в ИТ" in tech_chosen_problems or "Другой запрос в АХО" in serv_chosen_problems:
+                if "Другой запрос в ИТ" in tech_chosen_problems or "Другой запрос в АХО" in serv_chosen_problems or "Проблемы с мебелью" in serv_chosen_problems:
                     if "Проблемы с оборудованием" in tech_chosen_problems:
                         left_text, right_text = st.columns([1, 1])
                     else:
@@ -844,8 +871,8 @@ def request(object: str):
                 if right_text is not None:
                     right_text.text_area("Другая причина обращения", key="other", placeholder="Опишите ситуацию", label_visibility="collapsed")
 
-                if "Проблемы с мебелью" in serv_chosen_problems:
-                    st.text_area("Коментарии к проблеме с мебелью", key="other_furniture", placeholder="Опишите ситуацию с мебелью", label_visibility="collapsed")
+                #if "Проблемы с мебелью" in serv_chosen_problems:
+                #    st.text_area("Коментарии к проблеме с мебелью", key="other_furniture", placeholder="Опишите ситуацию с мебелью", label_visibility="collapsed")
 
                 if "Другой запрос в ИТ" in tech_chosen_problems:
                     st.session_state.other_it = True
@@ -855,6 +882,10 @@ def request(object: str):
                     st.session_state.other_serv = True
                 else:
                     st.session_state.other_serv = False
+                if "Проблемы с мебелью" in serv_chosen_problems:
+                    st.session_state.other_furniture = True
+                else:
+                    st.session_state.other_furniture = False
 
                 if "Подключиться к принтеру" in tech_chosen_problems:
                     st.session_state.printer_connect = True

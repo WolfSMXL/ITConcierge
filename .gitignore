@@ -1,3 +1,6 @@
 .env
 secrets.toml
 files/mp4/*
+templates/*
+flask_app.py
+flask_routes.py
