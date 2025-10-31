@@ -1,18 +1,25 @@
 import base64
 import csv
+import hashlib
+import hmac
 import io
+import json
 import os
 import re
+import magic
 from email.message import EmailMessage
 from pathlib import Path
 from time import sleep, time
 from urllib.parse import urlencode
 from random import randint
 
+from cryptography.fernet import Fernet
+from streamlit_local_storage import LocalStorage
+
 import streamlit as st
 from exchangelib import DELEGATE, Account, Credentials, Message, Mailbox, HTMLBody
 from jira import JIRA
-from streamlit_cookies_manager import EncryptedCookieManager
+from streamlit.components.v1 import html as st_html
 
 
 def hide_sidebar():
@@ -41,6 +48,37 @@ def setup_page_config():
     '''
     st.markdown(hide_decoration_bar_style, unsafe_allow_html=True)
 
+    st.markdown("""
+    <style>
+    header[data-testid="stHeader"] { height: 0; visibility: hidden; }   /* можно убрать, если нужен штатный хедер */
+    div[data-testid="stAppViewContainer"] > .main { padding-top: 0 !important; }
+
+    /* Верхняя полоса внутри контент-колонки (в обычном потоке, без fixed) */
+    .page-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 0;         /* уменьшенный вертикальный зазор */
+    }
+
+    /* Кнопка справа */
+    .page-top .btn {
+      display: inline-block;
+      padding: 8px 14px;
+      border: 1px solid rgba(49,51,63,.25);
+      border-radius: 6px;
+      text-decoration: none;
+      font-weight: 600;
+      white-space: nowrap;     /* без переноса на мобилках */
+      background: var(--background-color);
+      color: var(--text-color);
+      box-shadow: 0 1px 2px rgba(0,0,0,.06);
+    }
+    .page-top .btn:hover { filter: brightness(.97); }
+    </style>
+    """, unsafe_allow_html=True)
+
     st.markdown(
         '<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">',
         unsafe_allow_html=True)
@@ -49,17 +87,23 @@ def setup_page_config():
     encoded_img = base64.b64encode(img_bytes).decode()
     img_html = "data:image/png;base64,{}".format(encoded_img)
     st.markdown(f"""
-    <nav class="navbar fixed-top navbar-expand-lg navbar-dark">
-      <a href="https://jira.data-integration.ru/plugins/servlet/desk">
-        <img src="{img_html}" width=30 class="navbar-brand" target="_blank"></img>
-      </a>
-    </nav>
+    <div class="page-top">
+        <a href="https://jira.data-integration.ru/plugins/servlet/desk">
+            <img src="{img_html}" width=30 class="navbar-brand" target="_blank"></img>
+        </a>
+        <div id="fixed-logout">
+            <form method="get">
+                <input type="hidden" name="logout" value="true">
+                <button>Выйти</button>
+            </form>
+        </div>
+    </div>
     """, unsafe_allow_html=True)
 
     st.set_page_config(
-        page_title="Admin, Help!",
+        page_title="DIS Help",
         page_icon="files/ico/DISg_colored.ico",
-        layout="centered",
+        layout="wide",
         initial_sidebar_state="collapsed"
     )
 
@@ -98,19 +142,21 @@ def send_email():
             if i[0] == st.session_state.object:
                 connection_link = i[1]
 
+    username = str(decode_string(os.getenv("OUTLOOK_TECH_LOGIN").encode()), 'utf-8')
+    password = str(decode_string(os.getenv("OUTLOOK_TECH_PASSWORD").encode()), 'utf-8')
     credentials = Credentials(
-        username=os.getenv("OUTLOOK_TECH_LOGIN"),
-        password=os.getenv("OUTLOOK_TECH_PASSWORD")
+        username=username,
+        password=password
     )
     a = Account(
-        primary_smtp_address=os.getenv("OUTLOOK_TECH_LOGIN"),
+        primary_smtp_address=username,
         credentials=credentials,
         autodiscover=True,
         access_type=DELEGATE
     )
 
     email = EmailMessage()
-    email["From"] = os.getenv("OUTLOOK_TECH_LOGIN")
+    email["From"] = username
     email["To"] = st.session_state.user_email
     email["Subject"] = "Инструкция по подключению принтера"
 
@@ -132,19 +178,22 @@ def send_email():
     m.send()
 
 def send_code_email():
+    username = str(decode_string(os.getenv("OUTLOOK_TECH_LOGIN").encode()), 'utf-8')
+    password = str(decode_string(os.getenv("OUTLOOK_TECH_PASSWORD").encode()), 'utf-8')
+
     credentials = Credentials(
-        username=os.getenv("OUTLOOK_TECH_LOGIN"),
-        password=os.getenv("OUTLOOK_TECH_PASSWORD")
+        username=username,
+        password=password
     )
     a = Account(
-        primary_smtp_address=os.getenv("OUTLOOK_TECH_LOGIN"),
+        primary_smtp_address=username,
         credentials=credentials,
         autodiscover=True,
         access_type=DELEGATE
     )
 
     email = EmailMessage()
-    email["From"] = os.getenv("OUTLOOK_TECH_LOGIN")
+    email["From"] = username
     email["To"] = st.session_state.user_email
     email["Subject"] = "Код подтверждения для входа в DIS Help"
 
@@ -171,6 +220,7 @@ def exit(auth_manager):
                     st.rerun()
 
 def create_tasks(body: str, files: list) -> None:
+    allowed_ext = ["image/jpeg", "image/png"]
     jira = st.session_state.jira
     projects = jira.projects()
     admin_help = -1
@@ -240,6 +290,7 @@ def create_tasks(body: str, files: list) -> None:
 
     try:
         issues = jira.create_issues(issues_list)
+        st.session_state.issues = issues
         if not st.session_state.anonymous:
             for i in issues:
                 i["issue"].update(reporter={'name': st.session_state.user.name})
@@ -248,11 +299,17 @@ def create_tasks(body: str, files: list) -> None:
                 for j in files:
                     bytesio = io.BytesIO(j.getvalue())
                     bytesio.seek(0)
-                    jira.add_attachment(issue=i["issue"], attachment=bytesio, filename=j.name)
+                    extension = magic.from_buffer(bytesio.read(16), mime=True)
+                    if extension in allowed_ext:
+                        jira.add_attachment(issue=i["issue"], attachment=bytesio, filename=j.name)
+                    else:
+                        st.session_state.wrong_files.append(j.name)
 
         if not st.session_state.anonymous and st.session_state.printer_connect:
             send_email()
-        request_info(issues)
+        st.session_state.req_info = True
+        st.rerun()
+        #request_info(issues)
     except Exception as e:
         if "CAPTCHA_CHALLENGE" in str(e):
             # Логика обработки капчи
@@ -277,15 +334,16 @@ def build_request(problems_dict) -> None:
                 line_end = ""
                 if _ == "Проблемы с оборудованием":
                     if "equipment" in st.session_state or "other_equipment" in st.session_state:
-                        line_end += " ("
-                        if "equipment" in st.session_state:
-                            for j in st.session_state.equipment:
-                                line_end += j + ", "
-                        if "other_equipment" in st.session_state:
-                            for j in st.session_state.other_equipment:
-                                line_end += j
-                        line_end = line_end.rstrip(", ")
-                        line_end += ")"
+                        if len(st.session_state.equipment) > 0 or len(st.session_state.other_equipment) > 0:
+                            line_end += " ("
+                            if "equipment" in st.session_state:
+                                for j in st.session_state.equipment:
+                                    line_end += j + ", "
+                            if "other_equipment" in st.session_state:
+                                for j in st.session_state.other_equipment:
+                                    line_end += j
+                            line_end = line_end.rstrip(", ")
+                            line_end += ")"
 
                 line_end += "\n"
                 st.session_state.request_body += str(i) + ") " + _ + line_end
@@ -297,13 +355,26 @@ def build_request(problems_dict) -> None:
         for _ in problems_dict["Обслуживание"]:
             if _ in st.session_state.service_problems:
                 if i == 1: st.session_state.request_body += "Обслуживающему персоналу:\n\n"
-                st.session_state.request_body += str(i) + ") " + _ + "\n"
+                line_end = ""
+                if _ == "Проблемы с мебелью":
+                    if st.session_state.other_furniture:
+                        add_text = re.sub(r'\n{2,}', '\n', st.session_state.other)
+                        add_text = re.sub(r'\n', ';', add_text)
+                        line_end += " (" + add_text + ") "
+
+                line_end += "\n"
+
+                st.session_state.request_body += str(i) + ") " + _ + line_end
                 i += 1
     if i != 1:
         st.session_state.request_body += "\n"
     i = 1
-    if st.session_state.other:
-        st.session_state.request_body += "Другие предложения:\n\n" + st.session_state.other.strip()
+    if st.session_state.other_it or st.session_state.other_serv:
+        if not st.session_state.other:
+            other_text = " "
+        else:
+            other_text = st.session_state.other
+        st.session_state.request_body += "Другие предложения:\n\n" + other_text
     return None
 
 def check_object() -> bool:
@@ -356,13 +427,18 @@ def checks() -> None:
     return None
 
 def init_session_state():
+    if "key" not in st.session_state:
+        st.session_state.key = st.secrets["Крошки"]["fernet_key"]
     # Соединение с Jira
     if 'jira' not in st.session_state:
         try:
-            basic_auth = (os.getenv("JIRA_TECH_LOGIN"), os.getenv("JIRA_TECH_PASSWORD"))
+            basic_auth = (str(decode_string(os.getenv("JIRA_TECH_LOGIN").encode()), 'utf-8'),
+                          str(decode_string(os.getenv("JIRA_TECH_PASSWORD").encode()), 'utf-8'))
             jira = JIRA(
                 options={"server": os.getenv("JIRA_SERVER")},
-                basic_auth=basic_auth
+                basic_auth=basic_auth,
+                max_retries=5,
+                logging=True
             )
         except Exception as e:
             print(str(e))
@@ -387,11 +463,10 @@ def init_session_state():
     if not 'user' in st.session_state: st.session_state.user = st.query_params.get(
         'user', "Аноним")
     # Имя пользователя
-    if not 'user_name' in st.session_state: st.session_state.user_email = "Аноним"
+    if not 'user_email' in st.session_state: st.session_state.user_email = "Аноним"
     # Обработка выхода
     if "other" not in st.session_state: st.session_state.other = None
-    if "cookies" not in st.session_state:
-        init_cookies()
+    init_local_storage()
     query_params = st.query_params
     if 'logout' not in query_params.keys():
         query_params['logout'] = "false"
@@ -403,6 +478,33 @@ def init_session_state():
         st.session_state.code = 0
     if "uploader_key" not in st.session_state:
         st.session_state.uploader_key = 0
+    if "disable_login_bt" not in st.session_state:
+        st.session_state.disable_login_bt = False
+    if "disable_request_bt" not in st.session_state:
+        st.session_state.disable_request_bt = False
+    st.session_state.wrong_files = []
+    if "req_info" not in st.session_state:
+        st.session_state.req_info = False
+
+def render_logout_btn():
+    auth = st.session_state.get("auth")
+
+    payload = {"type": "auth_state", "auth": auth}
+
+    st_html(f"""
+        <script>
+          (function() {{
+            var data = {json.dumps(payload)};
+            try {{
+              if (window.top && window.top !== window) {{
+                window.top.postMessage(data, "*"); // фильтрация — в родителе
+              }}
+            }} catch (_) {{}}
+            // Для отладки (можно убрать):
+            // console.log("Message sent from srcdoc", data);
+          }})();
+        </script>
+        """, height=0)
 
 def clear_selected():
     if "technical_problems" in st.session_state:
@@ -416,24 +518,30 @@ def clear_selected():
     if len(st.session_state[f"файлы_{st.session_state.uploader_key}"]) > 0:
         st.session_state.uploader_key += 1
 
-def init_cookies():
-    # Создание экземпляра менеджера куков
-    cookies = EncryptedCookieManager(
-        prefix=st.secrets["Крошки"]["префикс"],
-        password=os.environ.get("COOKIES_PASSWORD", st.secrets["Крошки"]["пароль"])
-    )
+def sign(value: str) -> str:
+    """Подписать значение куки, чтобы проверить целостность."""
+    secret_key = os.environ.get("COOKIES_PASSWORD", st.secrets["Крошки"]["пароль"])
+    signature = hmac.new(secret_key.encode(), value.encode(), hashlib.sha256).hexdigest()
+    return f"{value}|{signature}"
 
-    if not cookies.ready():
-        st.spinner("Ожидание загрузки хлебных крошек", show_time=True)
-        st.stop()
+def verify(signed: str) -> (str | None):
+    """Проверить подпись и вернуть оригинальное значение или None."""
+    secret_key = os.environ.get("COOKIES_PASSWORD", st.secrets["Крошки"]["пароль"])
+    if "|" not in signed:
+        return None
+    val, sig = signed.rsplit("|", 1)
+    expected = hmac.new(secret_key.encode(), val.encode(), hashlib.sha256).hexdigest()
+    if hmac.compare_digest(expected, sig):
+        return val
+    return None
 
-    st.session_state.cookies = cookies
+def init_local_storage():
+    st.session_state.local_s = LocalStorage()
 
 def auto_login():
     sleep(0.5)
-    cookies = st.session_state.cookies
-    # Пробуем достать логин из куки
-    stored_username = cookies.get('username', '')
+    local_s = st.session_state.local_s
+    stored_username = local_s.getItem('username')
     if stored_username:
         st.session_state.auth = True
         st.session_state.user_email = stored_username
@@ -444,55 +552,135 @@ def auto_login():
 def request_info(issues):
     issues_text = ""
     for i in issues:
-        issues_text += f"[{str(i['issue'].key)}]({os.getenv('JIRA_SERVER').rstrip(r"/")}/browse/{i['issue']}), "
-    st.write(f"Заявка ({issues_text.rstrip(", ")}) успешно создана! Уведомления о статусе заявки буду приходить на  вашу почту.")
+        issues_text += f"[{str(i['issue'].key)}]({os.getenv('JIRA_SERVER').rstrip(r'/')}/browse/{i['issue']}), "
+    st.write(f"Заявка ({issues_text.rstrip(', ')}) успешно создана! Уведомления о статусе заявки будут приходить на  вашу почту.")
     if st.session_state.printer_connect and not st.session_state.anonymous:
         st.write("Инструкция по подключению принтера была отправлена на вашу почту")
+    if len(st.session_state.wrong_files) > 0:
+        st.write("Следующие файлы не были загружены (формат файла не jpg, png, jpeg):")
+        for i in st.session_state.wrong_files:
+            st.write(f"- {i}")
+    st.write("Спасибо за заявку! Ваша техническая поддержка")
     if st.button("OK"):
+        st.session_state.disable_request_bt = False
         clear_selected()
         st.rerun()
 
 @st.dialog("Код подтверждения")
 def confirmation():
-    cookies = st.session_state.cookies
+    local_s = st.session_state.local_s
     st.write("Код подтверждения был отправлен на вашу почту.")
     code = st.text_input("Введите код подтверждения из письма:")
     if st.button("OK"):
         if str(st.session_state.code) == code:
             st.session_state.auth = True
             if st.session_state.remember_me:
-                # Устанавливаем cookie с сроком действия 30 дней
-                cookies['authenticated'] = 'true'
-                cookies['username'] = st.session_state.user_email
-                expires_at = int(time()) + 365 * 24 * 60 * 60  # 365 дней
-                cookies['expires_at'] = str(expires_at)
-                cookies.save()
-                st.session_state.cookies = cookies
-                # Обновляем страницу, чтобы скрыть форму входа
+                local_s.setItem('username', st.session_state.user_email, key='local_storage_username')
+                st.session_state.local_s = local_s
             st.rerun()
         else:
             st.error("Неверный код")
 
+def encode_string(string: str):
+    cipher_suite = Fernet(st.session_state.key)
+    return cipher_suite.encrypt(bytes(string, 'utf-8'))
+
+def decode_string(string: bytes):
+    cipher_suite = Fernet(st.session_state.key)
+    return cipher_suite.decrypt(string)
+
+def check_email():
+    split_email = st.session_state.user_email.split("@")
+    if len(split_email) != 2:
+        return False
+    elif split_email[1] != "dis-group.ru":
+        return False
+    return True
+
+def disable_login_bt():
+    st.session_state.disable_login_bt = True
+
+def disable_request_bt():
+    st.session_state.disable_request_bt = True
+
 def request(object: str):
-    cookies = st.session_state.cookies
+    local_s = st.session_state.local_s
     auto_logged_in = auto_login()
+    #render_logout_btn()
     # Если пользователь не аутентифицирован, показываем форму входа
-    if not st.session_state.auth and not auto_logged_in:
+    if st.session_state.req_info:
+        # Кнопка, встроенная через HTML-форму + query-параметр
+        st.markdown("""
+                    <style>
+                    #fixed-logout {
+                        position: fixed;
+                        top: 10px;
+                        right: 20px;
+                        z-index: 9999;
+                    }
+                    #fixed-logout button {
+                        font-weight: bold;
+                        padding: 8px 16px;
+                        border: none;
+                        border-radius: 5px;
+                        cursor: pointer;
+                    }
+                    </style>
+
+                    <div id="fixed-logout">
+                        <form method="get">
+                            <input type="hidden" name="logout" value="true">
+                            <button>Выйти</button>
+                        </form>
+                    </div>
+                    """, unsafe_allow_html=True)
+        # Обработка выхода
+        if st.session_state.logout:
+            # Сброс данных сессии
+            st.session_state.auth = False
+            local_s.deleteItem('username')
+            sleep(0.5)
+            st.query_params["logout"] = "false"
+            st.switch_page("qr.py")
+
+        issues_text = ""
+        issues = st.session_state.issues
+        for i in issues:
+            issues_text += f"[{str(i['issue'].key)}]({os.getenv('JIRA_SERVER').rstrip(r'/')}/browse/{i['issue']}), "
+        st.write(
+            f"Заявка ({issues_text.rstrip(', ')}) успешно создана! Уведомления о статусе заявки будут приходить на  вашу почту.")
+        if st.session_state.printer_connect and not st.session_state.anonymous:
+            st.write("Инструкция по подключению принтера была отправлена на вашу почту")
+        if len(st.session_state.wrong_files) > 0:
+            st.write("Следующие файлы не были загружены (формат файла не jpg, png, jpeg):")
+            for i in st.session_state.wrong_files:
+                st.write(f"- {i}")
+        st.write("Спасибо за заявку! Ваша техническая поддержка")
+        st.session_state.req_info = False
+    elif not st.session_state.auth and not auto_logged_in:
         st.empty()
         st.markdown("<h3 style='text-align: center;'>Добро пожаловать в DIS Help!</h3>", unsafe_allow_html=True)
         c1, c2, c3 = st.columns([1, 4, 1])
         with c2.form("auth_form"):
-            # st.image("files/png/Jira.webp", use_container_width=True)
             st.write("Для авторизации введите вашу электронную почту:")
             st.session_state.user_email = st.text_input("Почта", label_visibility="collapsed")
             st.session_state.remember_me = st.checkbox("Запомнить", value=True)
+            # submit_button = st.form_submit_button(
+            #     "Вход", use_container_width=True,
+            #     on_click=disable_login_bt, disabled=st.session_state.disable_login_bt)
             submit_button = st.form_submit_button(
                 "Вход", use_container_width=True)
             if submit_button:
-                st.session_state.code = randint(10000,99999)
-                send_code_email()
-                confirmation()
-
+                if check_email():
+                    st.session_state.code = randint(10000,99999)
+                    send_code_email()
+                    st.session_state.disable_login_bt = False
+                    confirmation()
+                else:
+                    st.error("Неправильная почта.")
+                    st.session_state.disable_login_bt = False
+                    sleep(1)
+                    st.rerun()
     else:
         """Форма создания заявки с st.pills и множественным выбором"""
         base_path = Path(__file__).parent
@@ -502,31 +690,31 @@ def request(object: str):
         objects_problems_file_path = (base_path / "../csv/problems_objects.csv").resolve()
 
         # Кнопка, встроенная через HTML-форму + query-параметр
-        st.markdown("""
-            <style>
-            #fixed-logout {
-                position: fixed;
-                top: 10px;
-                right: 20px;
-                z-index: 9999;
-            }
-            #fixed-logout button {
-                font-weight: bold;
-                padding: 8px 16px;
-                border: none;
-                border-radius: 5px;
-                cursor: pointer;
-            }
-            </style>
-    
-            <div id="fixed-logout">
-                <form method="get">
-                    <input type="hidden" name="logout" value="true">
-                    <button>Выйти</button>
-                </form>
-            </div>
-            """, unsafe_allow_html=True)
-        saved_username = cookies.get('username', '')
+        # st.markdown("""
+        #     <style>
+        #     #fixed-logout {
+        #         position: fixed;
+        #         top: 10px;
+        #         right: 20px;
+        #         z-index: 9999;
+        #     }
+        #     #fixed-logout button {
+        #         font-weight: bold;
+        #         padding: 8px 16px;
+        #         border: none;
+        #         border-radius: 5px;
+        #         cursor: pointer;
+        #     }
+        #     </style>
+        #
+        #     <div id="fixed-logout">
+        #         <form method="get">
+        #             <input type="hidden" name="logout" value="true">
+        #             <button>Выйти</button>
+        #         </form>
+        #     </div>
+        #     """, unsafe_allow_html=True)
+        saved_username = local_s.getItem('username')
         if saved_username:
             st.session_state.user_email = saved_username
 
@@ -553,11 +741,8 @@ def request(object: str):
         if st.session_state.logout:
             # Сброс данных сессии
             st.session_state.auth = False
-            cookies['authenticated'] = 'false'
-            cookies['username'] = ''
-            cookies['expires_at'] = '0'
-            cookies.save()
-            st.session_state.cookies = cookies
+            local_s.deleteItem('username')
+            sleep(0.5)
             st.query_params["logout"] = "false"
             st.switch_page("qr.py")
 
@@ -591,7 +776,6 @@ def request(object: str):
         problems_dict["Обслуживание"] = service_problems
 
         if (not st.session_state.request_sent) and (not st.session_state.request):
-            st.divider()
 
             if object != "":
                 st.session_state.object = object
@@ -675,7 +859,7 @@ def request(object: str):
                 if "Проблемы с оборудованием" in tech_chosen_problems:
                     left_text = st
 
-                if "Другой запрос в ИТ" in tech_chosen_problems or "Другой запрос в АХО" in serv_chosen_problems:
+                if "Другой запрос в ИТ" in tech_chosen_problems or "Другой запрос в АХО" in serv_chosen_problems or "Проблемы с мебелью" in serv_chosen_problems:
                     if "Проблемы с оборудованием" in tech_chosen_problems:
                         left_text, right_text = st.columns([1, 1])
                     else:
@@ -685,7 +869,10 @@ def request(object: str):
                 if left_text is not None:
                     left_text.text_area("Другое оборудование", key="other_equipment", placeholder="Другое оборудование", label_visibility="collapsed")
                 if right_text is not None:
-                    right_text.text_area("Другая причина обращения", key="other", placeholder="Другая причина обращения", label_visibility="collapsed")
+                    right_text.text_area("Другая причина обращения", key="other", placeholder="Опишите ситуацию", label_visibility="collapsed")
+
+                #if "Проблемы с мебелью" in serv_chosen_problems:
+                #    st.text_area("Коментарии к проблеме с мебелью", key="other_furniture", placeholder="Опишите ситуацию с мебелью", label_visibility="collapsed")
 
                 if "Другой запрос в ИТ" in tech_chosen_problems:
                     st.session_state.other_it = True
@@ -695,6 +882,10 @@ def request(object: str):
                     st.session_state.other_serv = True
                 else:
                     st.session_state.other_serv = False
+                if "Проблемы с мебелью" in serv_chosen_problems:
+                    st.session_state.other_furniture = True
+                else:
+                    st.session_state.other_furniture = False
 
                 if "Подключиться к принтеру" in tech_chosen_problems:
                     st.session_state.printer_connect = True
@@ -706,8 +897,7 @@ def request(object: str):
 
             st.file_uploader("Добавить вложение",
                              key=f"файлы_{st.session_state.uploader_key}",
-                             type=["jpg", "jpeg", "png", "pdf", "doc",
-                                   "docx", "xls", "xlsx"],
+                             type=["jpg", "jpeg", "png"],
                              accept_multiple_files=True)
 
             hide_label = """
@@ -723,25 +913,32 @@ def request(object: str):
                      """
             st.markdown(hide_label, unsafe_allow_html=True)
 
+            #st.button("Отправить заявку", on_click=disable_request_bt,
+            #          disabled=st.session_state.disable_request_bt)
+
             if st.button("Отправить заявку"):
 
                 build_request(problems_dict)
                 if not check_object():
                     st.error("Не выбран объект!")
                     sleep(1)
+                    st.session_state.disable_request_bt = False
+                    st.rerun()
                 else:
                     if not check_fields():
                         st.error("Форма не заполнена!")
                         sleep(1)
+                        st.session_state.disable_request_bt = False
+                        st.rerun()
                     else:
                         #st.info("Проверки выполнены...")
                         #st.info(st.session_state.request_body)
                         #st.info("Приложенных файлов: " + \
                         #        str(len(st.session_state[f"файлы_{st.session_state.uploader_key}"])))
                         create_tasks(st.session_state.request_body, st.session_state[f"файлы_{st.session_state.uploader_key}"])
-                        sleep(1)
+                        #sleep(1)
                         #st.rerun()
-            st.divider()
+
         elif st.session_state.request_sent:
             st.success("Ваша заявка отправлена!")
             if st.button("Новая заявка"):
