@@ -331,6 +331,8 @@ def build_request(problems_dict) -> None:
         for _ in problems_dict["Техподдержка"]:
             if _ in st.session_state.technical_problems:
                 if i == 1: st.session_state.request_body += "В техподдержку:\n\n"
+                if _ == "Подключиться к принтеру":
+                    continue
                 line_end = ""
                 if _ == "Проблемы с оборудованием":
                     if "equipment" in st.session_state or "other_equipment" in st.session_state:
